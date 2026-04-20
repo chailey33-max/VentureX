@@ -1,0 +1,7 @@
+{
+  "name": "VentureX | Business Blueprints",
+  "description": "Access 100+ low-overhead, high-margin local business blueprints with AI-powered execution plans and profit calculators.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}

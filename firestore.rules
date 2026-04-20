@@ -1,0 +1,122 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // DEFAULT DENY
+    // ===============================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ===============================================================
+    // PRIMITIVES & HELPERS
+    // ===============================================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Role Lookup
+    function getUserData(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && 
+        (
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData(request.auth.uid).role == 'admin') || 
+          (request.auth.token.email.lower() == 'chailey33@gmail.com' && request.auth.token.email_verified == true)
+        );
+    }
+
+    function isVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    // ===============================================================
+    // VALIDATION BLUEPRINTS
+    // ===============================================================
+
+    function isValidBusinessIdea(data) {
+      let required = ['id', 'title', 'category', 'description', 'startupCost', 'potentialIncome', 'customerAcquisition', 'image'];
+      let keys = data.keys();
+      return keys.hasAll(required) && keys.size() >= 8 && keys.size() <= 9 &&
+             data.id is string && data.id.size() > 0 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.category is string && data.category.size() > 0 &&
+             data.description is string && data.description.size() > 0 && data.description.size() <= 10000 &&
+             data.startupCost is map && 
+             data.startupCost.min is number && data.startupCost.min >= 0 &&
+             data.startupCost.max is number && data.startupCost.max >= data.startupCost.min &&
+             data.potentialIncome is string && data.potentialIncome.size() <= 500 &&
+             data.customerAcquisition is list && data.customerAcquisition.size() <= 50 &&
+             data.image is string && (data.image.matches('^https://.*') || data.image.size() == 0) &&
+             (!('upsell' in data) || (data.upsell is string && data.upsell.size() <= 2000));
+    }
+
+    function isValidUserProfile(data) {
+      let required = ['uid', 'email', 'isPaid'];
+      let keys = data.keys();
+      return keys.hasAll(required) &&
+             data.uid == request.auth.uid &&
+             data.email == request.auth.token.email &&
+             data.isPaid is bool &&
+             (!('role' in data) || (data.role in ['user', 'pro', 'admin'])) &&
+             (!('favorites' in data) || (data.favorites is list && data.favorites.size() <= 500)) &&
+             (!('checkedSteps' in data) || (data.checkedSteps is list && data.checkedSteps.size() <= 1000));
+    }
+
+    // ===============================================================
+    // COLLECTION RULES
+    // ===============================================================
+
+    // Ideas: Global read (Authenticated), Admin write
+    match /ideas/{ideaId} {
+      allow read: if isSignedIn();
+      allow create, delete: if isAdmin() && isValidBusinessIdea(incoming()) && isValidId(ideaId);
+      allow update: if isAdmin() && isValidBusinessIdea(incoming()) && isValidId(ideaId);
+    }
+
+    // Users: Private read/write, except PII rules (Owner Only)
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      
+      allow create: if isOwner(userId) && 
+                      isValidUserProfile(incoming()) &&
+                      incoming().isPaid == false && // Cannot self-grant paid status
+                      (!('role' in incoming()) || incoming().role == 'user') && // Cannot self-grant role
+                      incoming().createdAt == request.time;
+
+      allow update: if (isOwner(userId) || isAdmin()) && 
+                      isValidUserProfile(incoming()) &&
+                      (
+                        isAdmin() ||
+                        (
+                          isOwner(userId) &&
+                          incoming().updatedAt == request.time &&
+                          incoming().uid == existing().uid &&
+                          incoming().email == existing().email &&
+                          incoming().role == existing().role &&
+                          incoming().isPaid == existing().isPaid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['favorites', 'checkedSteps', 'updatedAt'])
+                        )
+                      );
+    }
+  }
+}

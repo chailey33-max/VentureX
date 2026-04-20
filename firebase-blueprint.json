@@ -1,0 +1,68 @@
+{
+  "entities": {
+    "BusinessIdea": {
+      "title": "Business Idea",
+      "description": "A high-margin, low-overhead business opportunity.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier for the business idea." },
+        "title": { "type": "string", "description": "The name of the business venture." },
+        "category": { "type": "string", "description": "Industry category (e.g., Landscaping, Tech)." },
+        "description": { "type": "string", "description": "Detailed description of the opportunity." },
+        "startupCost": {
+          "type": "object",
+          "properties": {
+            "min": { "type": "number", "description": "Minimum startup capital required." },
+            "max": { "type": "number", "description": "Maximum startup capital estimated." }
+          },
+          "required": ["min", "max"]
+        },
+        "potentialIncome": { "type": "string", "description": "Estimated monthly/annual income." },
+        "customerAcquisition": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of strategies for getting customers."
+        },
+        "upsell": { "type": "string", "description": "Potential high-ticket upgrade or recurring service." },
+        "image": { "type": "string", "description": "URL to a representative image." }
+      },
+      "required": ["id", "title", "category", "description", "startupCost", "potentialIncome", "customerAcquisition", "image"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Comprehensive user account data including status and saved items.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID." },
+        "email": { "type": "string", "description": "User's primary email address." },
+        "isPaid": { "type": "boolean", "description": "Whether the user has premium access." },
+        "role": { "type": "string", "enum": ["user", "pro", "admin"], "description": "Account permission level." },
+        "subscriptionStatus": { "type": "string", "description": "Stripe subscription state." },
+        "plan": { "type": "string", "description": "Active subscription plan name." },
+        "favorites": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of favorite BusinessIdea IDs."
+        },
+        "checkedSteps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Tracked execution roadmap steps (e.g., ideaId-stepId)."
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "isPaid"]
+    }
+  },
+  "firestore": {
+    "/ideas/{ideaId}": {
+      "schema": "BusinessIdea",
+      "description": "Global collection of business blueprints."
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Private user profiles and application state."
+    }
+  }
+}
