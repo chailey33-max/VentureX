@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence, useMotionValue, useSpring } from 'motion/react';
 import { 
   Search, 
@@ -80,6 +80,9 @@ enum OperationType {
   GET = 'get',
   WRITE = 'write',
 }
+
+/** listener = onSnapshot error; background = automatic writes from effects; user = explicit user action */
+type FirestoreErrorSource = 'listener' | 'background' | 'user';
 
 interface FirestoreErrorInfo {
   error: string;
@@ -489,15 +492,37 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [selectedIdea, setSelectedIdea] = useState<BusinessIdea | null>(null);
+  /** True when modal opened via "Add Idea" (new draft), false when viewing/editing an existing card. */
+  const [isCreatingOpportunity, setIsCreatingOpportunity] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [showExecutionPlan, setShowExecutionPlan] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  /** Idea to delete when confirming from the grid (avoid opening the detail modal). */
+  const [pendingDeleteIdea, setPendingDeleteIdea] = useState<BusinessIdea | null>(null);
   const [showDeduplicateConfirm, setShowDeduplicateConfirm] = useState(false);
   const [showAutoEnhanceConfirm, setShowAutoEnhanceConfirm] = useState(false);
   const [showRevertConfirm, setShowRevertConfirm] = useState(false);
   const [adminFeedback, setAdminFeedback] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const feedbackCooldownRef = useRef<Record<string, number>>({});
+  /** Avoid repeating the unverified-admin Firestore toast once we've shown it (cleared when email verifies). */
+  const unverifiedIdeasPermissionToastShownRef = useRef(false);
   
+  const showAdminFeedback = (
+    feedback: { message: string; type: 'success' | 'error' | 'info' },
+    cooldownMs = 0
+  ) => {
+    const feedbackKey = `${feedback.type}:${feedback.message}`;
+    const now = Date.now();
+    const lastShownAt = feedbackCooldownRef.current[feedbackKey] || 0;
+    if (cooldownMs > 0 && now - lastShownAt < cooldownMs) return;
+
+    feedbackCooldownRef.current[feedbackKey] = now;
+    setAdminFeedback(current =>
+      current?.message === feedback.message && current?.type === feedback.type ? current : feedback
+    );
+  };
+
   // Auth State
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup' | 'forgot'>('login');
@@ -505,7 +530,12 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
 
-  const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
+  const handleFirestoreError = (
+    error: unknown,
+    operationType: OperationType,
+    path: string | null,
+    source: FirestoreErrorSource = 'user'
+  ) => {
     const message = error instanceof Error ? error.message : String(error);
     const errInfo: FirestoreErrorInfo = {
       error: message,
@@ -519,16 +549,52 @@ export default function App() {
       path
     };
     console.error('Firestore Error: ', JSON.stringify(errInfo));
-    
-    if (message.includes('insufficient permissions')) {
-      setAdminFeedback({
-        message: 'Permission Denied. Please ensure your email is verified to perform admin actions.',
-        type: 'error'
-      });
+
+    const isPermissionDenied =
+      message.includes('insufficient permissions') ||
+      message.includes('permission-denied') ||
+      message.includes('Permission denied');
+
+    // Realtime listeners and background work retry often — never spam toasts.
+    if (source === 'listener' || source === 'background') {
+      return;
+    }
+
+    if (isPermissionDenied) {
+      const u = auth.currentUser;
+      const email = u?.email?.toLowerCase() ?? '';
+      const isUnverifiedChailey =
+        email === 'chailey33@gmail.com' && !!u && !u.emailVerified;
+      const pathStr = path ?? '';
+      const isIdeasPath = pathStr.startsWith('ideas');
+
+      if (isUnverifiedChailey && isIdeasPath) {
+        if (unverifiedIdeasPermissionToastShownRef.current) {
+          return;
+        }
+        unverifiedIdeasPermissionToastShownRef.current = true;
+        showAdminFeedback(
+          {
+            message:
+              'Permission Denied. Please ensure your email is verified to perform admin actions.',
+            type: 'error',
+          },
+          120_000
+        );
+      } else {
+        showAdminFeedback(
+          {
+            message:
+              'Could not sync with the cloud. Please check that you are signed in and try again.',
+            type: 'error',
+          },
+          30_000
+        );
+      }
     } else {
       setAdminFeedback({
         message: `Firestore Error: ${message.split('\n')[0]}`,
-        type: 'error'
+        type: 'error',
       });
     }
   };
@@ -644,9 +710,13 @@ export default function App() {
           createdAt: new Date().toISOString(),
           isPaid: false,
           role: 'user'
-        }).catch(err => handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`));
+        }).catch(err =>
+          handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`, 'background')
+        );
       }
-    }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}`));
+    }, (error) =>
+      handleFirestoreError(error, OperationType.GET, `users/${user.uid}`, 'listener')
+    );
 
     return () => unsubscribe();
   }, [user]);
@@ -717,6 +787,12 @@ export default function App() {
   const isAdmin = (user?.email?.toLowerCase() === 'chailey33@gmail.com') && user?.emailVerified;
   const isUnverifiedAdmin = (user?.email?.toLowerCase() === 'chailey33@gmail.com') && !user?.emailVerified;
 
+  useEffect(() => {
+    if (!user || user.emailVerified) {
+      unverifiedIdeasPermissionToastShownRef.current = false;
+    }
+  }, [user]);
+
   // Firebase Auth Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -756,9 +832,10 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Sync Global Ideas from Firestore
+  // Sync Global Ideas from Firestore (rules require auth — skip listener when signed out)
   useEffect(() => {
     if (isLoading) return; // Wait for IndexedDB to load first
+    if (!user) return;
 
     const ideasQuery = collection(db, 'ideas');
     const unsubscribe = onSnapshot(ideasQuery, (snapshot) => {
@@ -794,11 +871,11 @@ export default function App() {
         return newIdeas;
       });
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'ideas');
+      handleFirestoreError(error, OperationType.LIST, 'ideas', 'listener');
     });
 
     return () => unsubscribe();
-  }, [isLoading, isAdmin, isUnverifiedAdmin]);
+  }, [isLoading, user, isAdmin, isUnverifiedAdmin]);
 
   // Migration: Sync local data to Firestore when user logs in
   useEffect(() => {
@@ -828,7 +905,7 @@ export default function App() {
           }
         }
       } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
+        handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`, 'background');
       }
     };
 
@@ -966,6 +1043,15 @@ export default function App() {
 
   const syncToCloud = async () => {
     if (!isAdmin && !isUnverifiedAdmin) return;
+    if (!isAdmin) {
+      if (isUnverifiedAdmin) {
+        setAdminFeedback({
+          message: 'Verify your email before syncing changes to the cloud.',
+          type: 'info',
+        });
+      }
+      return;
+    }
     setIsGenerating(true);
     try {
       const batch = writeBatch(db);
@@ -1173,24 +1259,26 @@ export default function App() {
       }
     });
 
-    // Update Firestore if Admin
-    try {
-      const ideaDocRef = doc(db, 'ideas', updatedIdea.id);
-      await setDoc(ideaDocRef, updatedIdea);
-      // If successful, we can remove it from modified tracking if we want, 
-      // but usually we keep it until a full sync or just trust the cloud now.
-      setModifiedIds(prev => {
-        const next = new Set(prev);
-        next.delete(updatedIdea.id);
-        return next;
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `ideas/${updatedIdea.id}`);
-      // Mark as modified locally since cloud sync failed
+    // Firestore writes require verified admin — skip silently for others (local state already updated)
+    if (isAdmin) {
+      try {
+        const ideaDocRef = doc(db, 'ideas', updatedIdea.id);
+        await setDoc(ideaDocRef, updatedIdea);
+        setModifiedIds(prev => {
+          const next = new Set(prev);
+          next.delete(updatedIdea.id);
+          return next;
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, `ideas/${updatedIdea.id}`);
+        setModifiedIds(prev => new Set(prev).add(updatedIdea.id));
+      }
+    } else if (isUnverifiedAdmin) {
       setModifiedIds(prev => new Set(prev).add(updatedIdea.id));
     }
 
     setSelectedIdea(updatedIdea);
+    setIsCreatingOpportunity(false);
     setIsEditing(false);
   };
 
@@ -1211,6 +1299,7 @@ export default function App() {
       upsell: 'Offer a premium service package or maintenance plan.'
     };
     setAllIdeas(prev => [newIdea, ...prev]);
+    setIsCreatingOpportunity(true);
     setSelectedIdea(newIdea);
     setIsEditing(true);
   };
@@ -1276,11 +1365,14 @@ export default function App() {
   };
 
   const handleDelete = async () => {
-    if (!selectedIdea) return;
-    
-    const updatedIdeas = allIdeas.filter(i => i.id !== selectedIdea.id);
+    const target = pendingDeleteIdea ?? selectedIdea;
+    if (!target) return;
+
+    const updatedIdeas = allIdeas.filter(i => i.id !== target.id);
     setAllIdeas(updatedIdeas);
     setSelectedIdea(null);
+    setIsCreatingOpportunity(false);
+    setPendingDeleteIdea(null);
     setIsEditing(false);
     setShowDeleteConfirm(false);
   };
@@ -1373,7 +1465,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-luxury-black text-white selection:bg-gold/30 relative">
+    <div className="min-h-screen bg-luxury-black text-white selection:bg-gold/30 relative overflow-x-hidden">
       {/* Admin Feedback Toast */}
       <AnimatePresence>
         {adminFeedback && (
@@ -1443,7 +1535,7 @@ export default function App() {
       {/* Global Navigation */}
       <nav className="fixed top-0 left-0 right-0 z-[100] bg-luxury-black/80 backdrop-blur-xl border-b border-white/5">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3 group cursor-pointer" onClick={() => { setSelectedIdea(null); setSelectedCategory('All'); }}>
+          <div className="flex items-center gap-3 group cursor-pointer" onClick={() => { setSelectedIdea(null); setIsCreatingOpportunity(false); setSelectedCategory('All'); }}>
             <div className="w-10 h-10 bg-gold rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(212,175,55,0.3)] group-hover:scale-110 transition-transform duration-500">
               <TrendingUp className="w-6 h-6 text-luxury-black" />
             </div>
@@ -1585,7 +1677,7 @@ export default function App() {
 
       {/* Hero Section */}
       {!hasAccess ? (
-        <header className="relative min-h-screen flex items-center justify-center overflow-hidden py-20 px-6">
+        <header className="relative min-h-screen flex items-center justify-center overflow-hidden pt-28 pb-20 sm:pt-32 sm:pb-24 px-6">
           <div className="absolute inset-0 z-0">
             <div className="absolute inset-0 bg-linear-to-b from-gold/5 via-luxury-black/50 to-luxury-black" />
             <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-[0.05] mix-blend-overlay" />
@@ -1659,14 +1751,18 @@ export default function App() {
           </div>
         </header>
       ) : (
-        <header className="relative min-h-[60vh] md:h-[70vh] flex items-center justify-center overflow-hidden py-20 px-6">
+        <header
+          className={`relative flex min-h-[60vh] flex-col items-center justify-start overflow-hidden px-6 pb-16 sm:pb-20 md:min-h-[70vh] ${
+            isUnverifiedAdmin ? 'pt-36 sm:pt-40 md:pt-44' : 'pt-28 sm:pt-36 md:pt-40'
+          }`}
+        >
           <div className="absolute inset-0 z-0">
             <div className="absolute inset-0 bg-linear-to-b from-gold/5 via-luxury-black/50 to-luxury-black" />
             <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-[0.05] mix-blend-overlay" />
             <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-gold/10 rounded-full blur-[150px] animate-pulse" />
           </div>
 
-          <div className="relative z-10 text-center max-w-5xl mx-auto">
+          <div className="relative z-10 mx-auto w-full max-w-5xl text-center">
             <motion.div
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
@@ -1727,12 +1823,12 @@ export default function App() {
         </header>
       )}
 
-      {/* Search & Filter Bar */}
-      <section id="catalog" className="sticky top-0 z-40 bg-luxury-black/80 backdrop-blur-xl border-b border-white/5 py-8">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col lg:flex-row items-center gap-8">
+      {/* Search above category tabs (centered); tab strip scrolls horizontally without visible scrollbar */}
+      <section id="catalog" className="sticky top-0 z-40 overflow-x-hidden bg-luxury-black/80 backdrop-blur-xl border-b border-white/5 py-8">
+        <div className="mx-auto flex min-w-0 max-w-7xl flex-col items-stretch gap-6 px-6 lg:gap-8">
           <form 
             onSubmit={(e) => e.preventDefault()}
-            className="relative w-full lg:max-w-xl group"
+            className="group relative mx-auto w-full max-w-2xl shrink-0"
           >
             <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-500 w-4 h-4 pointer-events-none group-focus-within:text-gold transition-colors" />
             <input 
@@ -1753,13 +1849,14 @@ export default function App() {
             )}
           </form>
           
-          <div className="flex flex-wrap items-center gap-4 w-full lg:w-auto">
-            <div className="flex items-center gap-2 overflow-x-auto pb-2 lg:pb-0 w-full lg:w-auto no-scrollbar">
+          <div className="flex min-w-0 w-full flex-col gap-4 sm:flex-row sm:items-center sm:gap-3">
+            <div className="no-scrollbar min-w-0 flex-1 overflow-x-auto overscroll-x-contain py-1">
+              <div className="flex w-max items-center gap-2 pr-1">
               {CATEGORIES.map(category => (
                 <button
                   key={category}
                   onClick={() => setSelectedCategory(category)}
-                  className={`px-6 py-3 rounded-full text-[10px] font-display font-bold uppercase tracking-[0.2em] whitespace-nowrap transition-all duration-500 ${
+                  className={`shrink-0 px-6 py-3 rounded-full text-[10px] font-display font-bold uppercase tracking-[0.2em] whitespace-nowrap transition-all duration-500 ${
                     selectedCategory === category 
                       ? 'bg-gold text-luxury-black shadow-[0_0_20px_rgba(212,175,55,0.3)]' 
                       : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'
@@ -1768,9 +1865,10 @@ export default function App() {
                   {category}
                 </button>
               ))}
+              </div>
             </div>
             
-            <div className="flex items-center gap-3 ml-auto">
+            <div className="flex shrink-0 flex-wrap items-center gap-3 sm:justify-end">
               {selectedCategory === 'Shortlisted' && favorites.length > 1 && (
                 <button
                   onClick={() => setShowComparison(true)}
@@ -1932,7 +2030,7 @@ export default function App() {
               </div>
               <h3 className="text-2xl font-bold text-white mb-2">Delete Opportunity?</h3>
               <p className="text-gray-400 mb-8">
-                Are you sure you want to remove "<span className="text-white font-medium">{selectedIdea?.title}</span>"? This action cannot be undone.
+                Are you sure you want to remove "<span className="text-white font-medium">{(pendingDeleteIdea ?? selectedIdea)?.title}</span>"? This action cannot be undone.
               </p>
               <div className="flex flex-col gap-3">
                 <button
@@ -1942,7 +2040,10 @@ export default function App() {
                   Yes, Delete It
                 </button>
                 <button
-                  onClick={() => setShowDeleteConfirm(false)}
+                  onClick={() => {
+                    setShowDeleteConfirm(false);
+                    setPendingDeleteIdea(null);
+                  }}
                   className="w-full py-4 bg-white/5 text-white rounded-xl hover:bg-white/10 transition-all"
                 >
                   Keep It
@@ -2005,7 +2106,11 @@ export default function App() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95 }}
                   transition={{ duration: 0.6, delay: index * 0.05, ease: [0.23, 1, 0.32, 1] }}
-                  onClick={() => setSelectedIdea(idea)}
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest('button')) return;
+                    setIsCreatingOpportunity(false);
+                    setSelectedIdea(idea);
+                  }}
                   className="group cursor-pointer"
                 >
                   <div className="luxury-card overflow-hidden h-full flex flex-col">
@@ -2031,6 +2136,7 @@ export default function App() {
                       </div>
 
                       <button 
+                        type="button"
                         onClick={(e) => toggleFavorite(idea.id, e)}
                         className={`absolute top-6 right-6 p-3 rounded-full backdrop-blur-xl border transition-all duration-500 ${
                           favorites.includes(idea.id)
@@ -2044,8 +2150,10 @@ export default function App() {
                       {(isAdmin || isUnverifiedAdmin) && (
                         <div className="absolute top-6 right-20 flex gap-2">
                           <button 
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
+                              setIsCreatingOpportunity(false);
                               setSelectedIdea(idea);
                               setIsEditing(true);
                             }}
@@ -2055,9 +2163,10 @@ export default function App() {
                             <Pencil className="w-4 h-4" />
                           </button>
                           <button 
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedIdea(idea);
+                              setPendingDeleteIdea(idea);
                               setShowDeleteConfirm(true);
                             }}
                             className="p-3 rounded-full backdrop-blur-xl border bg-luxury-black/40 border-white/10 text-red-500/60 hover:bg-red-500/20 hover:border-red-500/50 transition-all duration-500"
@@ -2077,15 +2186,15 @@ export default function App() {
                         {idea.description}
                       </p>
                       
-                      <div className="mt-auto pt-8 border-t border-white/5 flex items-center justify-between">
-                        <div className="flex flex-col">
+                      <div className="mt-auto pt-8 border-t border-white/5 flex items-end justify-between gap-4">
+                        <div className="min-w-0 flex flex-col">
                           <span className="text-[9px] font-display font-bold uppercase tracking-[0.2em] text-gray-500 mb-1">Valuation Potential</span>
                           <span className="text-lg font-display font-bold text-white tracking-tight">{idea.potentialIncome}</span>
                         </div>
-                        <div className="flex items-center gap-3 text-gold group/btn">
-                          <span className="text-[10px] font-display font-bold uppercase tracking-[0.2em]">Explore</span>
-                          <div className="w-8 h-8 rounded-full border border-gold/30 flex items-center justify-center group-hover/btn:bg-gold group-hover/btn:text-luxury-black transition-all duration-500">
-                            <ArrowRight className="w-4 h-4" />
+                        <div className="flex shrink-0 translate-x-1 -translate-y-1 sm:translate-x-2 sm:-translate-y-0.5 items-center gap-3.5 text-gold group/btn">
+                          <span className="text-[11px] font-display font-bold uppercase tracking-[0.2em]">Explore</span>
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-gold/30 transition-all duration-500 group-hover/btn:bg-gold group-hover/btn:text-luxury-black">
+                            <ArrowRight className="h-5 w-5" />
                           </div>
                         </div>
                       </div>
@@ -2162,7 +2271,10 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setSelectedIdea(null)}
+              onClick={() => {
+                setSelectedIdea(null);
+                setIsCreatingOpportunity(false);
+              }}
               className="absolute inset-0 bg-luxury-black/90 backdrop-blur-sm"
             />
             
@@ -2185,6 +2297,7 @@ export default function App() {
                 <button 
                   onClick={() => {
                     setSelectedIdea(null);
+                    setIsCreatingOpportunity(false);
                     setShowExecutionPlan(false);
                     setIsEditing(false);
                   }}
@@ -2205,7 +2318,9 @@ export default function App() {
                   >
                     <div className="max-w-3xl mx-auto">
                       <div className="flex items-center justify-between mb-12">
-                        <h2 className="text-4xl font-serif text-gold">Edit Opportunity</h2>
+                        <h2 className="text-4xl font-serif text-gold">
+                          {isCreatingOpportunity ? 'Add New Opportunity' : 'Edit Opportunity'}
+                        </h2>
                         <button 
                           onClick={() => setIsEditing(false)}
                           className="p-3 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 transition-all text-gray-500 hover:text-white"
@@ -2266,7 +2381,7 @@ export default function App() {
                               onClick={handleSaveEdit}
                               className="flex-grow gold-gradient text-luxury-black font-display font-bold py-5 rounded-full hover:scale-[1.02] transition-all shadow-[0_0_20px_rgba(212,175,55,0.3)] uppercase tracking-widest text-xs"
                             >
-                              Save Collection Item
+                              {isCreatingOpportunity ? 'Add to collection' : 'Save collection item'}
                             </button>
                             <button 
                               onClick={() => setIsEditing(false)}
@@ -2276,12 +2391,14 @@ export default function App() {
                             </button>
                           </div>
                           
+                          {!isCreatingOpportunity && (
                           <button 
                             onClick={() => setShowDeleteConfirm(true)}
                             className="w-full py-4 text-red-500/40 hover:text-red-500 text-[10px] font-display font-bold uppercase tracking-[0.3em] transition-colors"
                           >
                             Remove from Collection
                           </button>
+                          )}
                         </div>
 
                         {storageError && (
@@ -2721,16 +2838,17 @@ export default function App() {
                 initial={{ opacity: 0, scale: 0.9, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                className="bg-luxury-black border border-gold/30 rounded-[2.5rem] p-6 sm:p-8 md:p-12 max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-[0_0_100px_rgba(212,175,55,0.2)] relative"
+                className="bg-luxury-black border border-gold/30 rounded-[2.5rem] max-w-2xl w-full max-h-[90vh] shadow-[0_0_100px_rgba(212,175,55,0.2)] relative flex flex-col overflow-hidden"
               >
-                <div className="absolute top-0 left-0 w-full h-1 gold-gradient" />
+                <div className="absolute top-0 left-0 w-full h-1 gold-gradient z-10 pointer-events-none" />
                 <button 
                   onClick={() => setShowPaywall(false)}
-                  className="absolute top-6 right-6 p-2 hover:bg-white/10 rounded-full transition-colors"
+                  className="absolute top-6 right-6 z-20 p-2 hover:bg-white/10 rounded-full transition-colors"
                 >
                   <X className="w-6 h-6 text-gray-500" />
                 </button>
 
+                <div className="scrollbar-stable-paywall flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 sm:px-8 md:px-12 pt-6 sm:pt-8 md:pt-12 pb-6 sm:pb-8 md:pb-12">
                 <div className="text-center mb-10">
                   <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gold/10 rounded-3xl flex items-center justify-center mx-auto mb-6 rotate-12 border border-gold/20">
                     <Sparkles className="w-8 h-8 sm:w-10 sm:h-10 text-gold" />
@@ -2797,6 +2915,7 @@ export default function App() {
                 <p className="text-center text-[10px] text-gray-600 mt-8 uppercase tracking-widest">
                   Secure payment via Stripe
                 </p>
+                </div>
             </motion.div>
           </motion.div>
         )}

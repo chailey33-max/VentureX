@@ -36,7 +36,8 @@
 
   .luxury-card::after {
     content: '';
-    @apply absolute inset-0 bg-linear-to-br from-gold/5 to-transparent opacity-0 transition-opacity duration-500;
+    /* Decorative overlay must not sit above interactive controls (edit / delete / heart). */
+    @apply pointer-events-none absolute inset-0 bg-linear-to-br from-gold/5 to-transparent opacity-0 transition-opacity duration-500;
   }
 
   .luxury-card:hover::after {
@@ -72,6 +73,35 @@
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
     @apply bg-white/10 rounded-full hover:bg-gold/50 transition-colors;
+  }
+
+  /* Modal/paywall: scrollbar stays inside rounded card; thumb color does not change on hover/drag */
+  .scrollbar-stable-paywall {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+    overscroll-behavior: contain;
+  }
+
+  .scrollbar-stable-paywall::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .scrollbar-stable-paywall::-webkit-scrollbar-track {
+    background: transparent;
+    margin-block: 12px;
+  }
+
+  .scrollbar-stable-paywall::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.14);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .scrollbar-stable-paywall::-webkit-scrollbar-thumb:hover,
+  .scrollbar-stable-paywall::-webkit-scrollbar-thumb:active {
+    background-color: rgba(255, 255, 255, 0.14);
   }
 }
 
