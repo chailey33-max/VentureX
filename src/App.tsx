@@ -730,23 +730,36 @@ export default function App() {
     setIsProcessingPayment(true);
     try {
       console.log('[Stripe] Initiating automated checkout via API...');
-      const response = await fetch('/api/create-checkout-session', {
+      const payload = JSON.stringify({
+        userId: user.uid,
+        userEmail: user.email,
+      });
+      const requestInit: RequestInit = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          userId: user.uid,
-          userEmail: user.email,
-        }),
-      });
+        body: payload,
+      };
+      let response = await fetch('/api/create-checkout-session', requestInit);
+      let rawBody = await response.text();
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Server error: ${response.status}`);
+      // Netlify static deployments may route /api/* to index.html; fallback to Netlify Function.
+      if (rawBody.trim().startsWith('<!DOCTYPE') || rawBody.trim().startsWith('<html')) {
+        response = await fetch('/.netlify/functions/create-checkout-session', requestInit);
+        rawBody = await response.text();
       }
 
-      const session = await response.json();
+      let session: any;
+      try {
+        session = rawBody ? JSON.parse(rawBody) : null;
+      } catch {
+        throw new Error('Server returned invalid response format.');
+      }
+
+      if (!response.ok) {
+        throw new Error(session?.error || `Server error: ${response.status}`);
+      }
       
       if (session.url) {
         console.log('[Stripe] Redirecting to Checkout:', session.url);
