@@ -62,7 +62,8 @@ import {
   updateDoc,
   arrayUnion,
   arrayRemove,
-  writeBatch
+  writeBatch,
+  serverTimestamp
 } from 'firebase/firestore';
 
 const CLEAN_BUSINESS_IDEAS = BUSINESS_IDEAS.filter(idea => idea !== undefined && idea !== null);
@@ -537,6 +538,12 @@ export default function App() {
     source: FirestoreErrorSource = 'user'
   ) => {
     const message = error instanceof Error ? error.message : String(error);
+
+    // Realtime listeners/background sync can retry; avoid noisy console spam in production.
+    if (source === 'listener' || source === 'background') {
+      return;
+    }
+
     const errInfo: FirestoreErrorInfo = {
       error: message,
       authInfo: {
@@ -554,11 +561,6 @@ export default function App() {
       message.includes('insufficient permissions') ||
       message.includes('permission-denied') ||
       message.includes('Permission denied');
-
-    // Realtime listeners and background work retry often — never spam toasts.
-    if (source === 'listener' || source === 'background') {
-      return;
-    }
 
     if (isPermissionDenied) {
       const u = auth.currentUser;
@@ -707,7 +709,7 @@ export default function App() {
         setDoc(userDocRef, {
           uid: user.uid,
           email: user.email,
-          createdAt: new Date().toISOString(),
+          createdAt: serverTimestamp(),
           isPaid: false,
           role: 'user'
         }).catch(err =>
@@ -821,7 +823,9 @@ export default function App() {
             await setDoc(userDocRef, {
               uid: currentUser.uid,
               email: currentUser.email,
-              isPaid: isAdminUser,
+              createdAt: serverTimestamp(),
+              isPaid: false,
+              role: 'user',
               favorites: [],
               checkedSteps: []
             });
