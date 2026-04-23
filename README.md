@@ -22,10 +22,10 @@ View your app in AI Studio: https://ai.studio/apps/6b2216cf-5795-4228-a3e7-bb0e0
 ## Admin Authorization Model
 
 Admin access now uses Firebase custom claims as the primary authorization source.
-A single legacy hardcoded admin email fallback is still enabled for continuity.
+Legacy hardcoded admin email fallbacks are still enabled for continuity.
 
 - Primary admin check: Firebase custom claim `admin: true` or `role: 'admin'`
-- Legacy fallback: `chailey33@gmail.com` with verified email
+- Legacy fallback: `chailey33@gmail.com` and `abdullah.asif2966@gmail.com` (verified email required)
 
 ### Grant/Revoke Process (With Approval)
 

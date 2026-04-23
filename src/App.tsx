@@ -106,10 +106,13 @@ const QUICK_TAGS = [
   { label: 'Quick Launch', query: 'simple easy fast' }
 ];
 
-const LEGACY_ADMIN_EMAIL = 'chailey33@gmail.com';
+const LEGACY_ADMIN_EMAILS = new Set([
+  'chailey33@gmail.com',
+  'abdullah.asif2966@gmail.com',
+]);
 
 const isLegacyAdminEmail = (email: string | null | undefined) => {
-  return (email ?? '').toLowerCase() === LEGACY_ADMIN_EMAIL;
+  return LEGACY_ADMIN_EMAILS.has((email ?? '').toLowerCase());
 };
 
 const hasAdminRoleClaim = (claims: Record<string, unknown>) => {

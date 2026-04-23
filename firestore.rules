@@ -43,7 +43,10 @@ service cloud.firestore {
     function isLegacyAdminEmail() {
       return isSignedIn() &&
              request.auth.token.email is string &&
-             request.auth.token.email.lower() == 'chailey33@gmail.com' &&
+             (
+               request.auth.token.email.lower() == 'chailey33@gmail.com' ||
+               request.auth.token.email.lower() == 'abdullah.asif2966@gmail.com'
+             ) &&
              request.auth.token.email_verified == true;
     }
 
