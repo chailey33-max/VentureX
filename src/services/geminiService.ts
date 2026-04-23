@@ -1,64 +1,78 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { auth } from "../firebase";
 import { BusinessIdea } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+type IdeasResponse = {
+  ideas: BusinessIdea[];
+};
 
-export async function generateNewIdeas(existingTitles: string[]): Promise<BusinessIdea[]> {
-  const prompt = `You are an expert business consultant specializing in "simple" but highly profitable local service businesses.
-  
-  TASK: Generate 5 unique business ideas that are different from these existing ones: ${existingTitles.join(', ')}.
-  
-  GUARDRAILS:
-  - Each business MUST have a startup cost under $5000.
-  - Focus on simple, high-demand service or maintenance businesses (e.g., cleaning, repair, specialty labor).
-  - Do NOT suggest digital-only businesses (SaaS, apps, etc.). These must be physical, local services.
-  - Provide realistic startup cost ranges based on current market rates for equipment and licensing.
-  - Include 4 specific, actionable customer acquisition strategies for each.
-  - Ensure the "potentialIncome" is a realistic annual range for a solo operator or small team.
-  
-  OUTPUT FORMAT: Return a JSON array of objects following the specified schema.`;
+type BrandNamesResponse = {
+  names: string[];
+};
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            id: { type: Type.STRING, description: "A unique UUID or short string ID" },
-            title: { type: Type.STRING, description: "Catchy but professional business name" },
-            category: { type: Type.STRING, description: "One of: Service, Maintenance, Automotive, Landscaping, Specialty, Seasonal, Cleaning" },
-            description: { type: Type.STRING, description: "A 2-3 sentence compelling description of the opportunity" },
-            startupCost: {
-              type: Type.OBJECT,
-              properties: {
-                min: { type: Type.NUMBER },
-                max: { type: Type.NUMBER }
-              },
-              required: ["min", "max"]
-            },
-            potentialIncome: { type: Type.STRING, description: "e.g., '$40,000 - $85,000/year'" },
-            customerAcquisition: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "4 specific strategies"
-            }
-          },
-          required: ["id", "title", "category", "description", "startupCost", "potentialIncome", "customerAcquisition"]
-        }
-      }
-    }
+async function getAuthHeader(): Promise<Record<string, string>> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error("Please sign in to use AI generation.");
+  }
+
+  const token = await currentUser.getIdToken();
+  return {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+}
+
+async function postToAiEndpoint<T>(endpoint: string, payload: Record<string, unknown>): Promise<T> {
+  const headers = await getAuthHeader();
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
   });
 
+  const rawBody = await response.text();
+  if (rawBody.trim().startsWith("<!DOCTYPE") || rawBody.trim().startsWith("<html")) {
+    throw new Error("AI endpoint is unavailable in this deployment.");
+  }
+
+  let parsed: any = null;
+  if (rawBody) {
+    try {
+      parsed = JSON.parse(rawBody);
+    } catch {
+      throw new Error("Server returned invalid response format.");
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(parsed?.error || `Server error: ${response.status}`);
+  }
+
+  return parsed as T;
+}
+
+export async function generateNewIdeas(existingTitles: string[]): Promise<BusinessIdea[]> {
   try {
-    const text = response.text;
-    const cleanText = text.replace(/```json\n?|\n?```/g, '').trim();
-    return JSON.parse(cleanText);
+    const data = await postToAiEndpoint<IdeasResponse>("/api/ai/generate-ideas", {
+      existingTitles,
+    });
+
+    return Array.isArray(data?.ideas) ? data.ideas : [];
   } catch (error) {
     console.error("Failed to parse AI response:", error);
+    return [];
+  }
+}
+
+export async function generateBrandNames(ideaTitle: string): Promise<string[]> {
+  try {
+    const data = await postToAiEndpoint<BrandNamesResponse>("/api/ai/generate-brand-names", {
+      ideaTitle,
+    });
+
+    return Array.isArray(data?.names) ? data.names : [];
+  } catch (error) {
+    console.error("Failed to generate AI brand names:", error);
     return [];
   }
 }

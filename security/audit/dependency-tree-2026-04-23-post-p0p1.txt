@@ -1,0 +1,28 @@
+business-ventures@0.0.0 /Users/abdullahasif/Desktop/VentureX
+├─┬ @google/genai@1.48.0
+│ └── protobufjs@7.5.5 overridden
+├─┬ @tailwindcss/vite@4.2.2
+│ └── vite@6.4.2 deduped
+├─┬ @vitejs/plugin-react@5.2.0
+│ └── vite@6.4.2 deduped
+├─┬ firebase-admin@13.8.0
+│ ├─┬ @google-cloud/firestore@7.11.6
+│ │ ├─┬ google-gax@4.6.1
+│ │ │ ├─┬ @grpc/grpc-js@1.14.3
+│ │ │ │ └─┬ @grpc/proto-loader@0.8.0
+│ │ │ │   └── protobufjs@7.5.5 deduped
+│ │ │ ├─┬ proto3-json-serializer@2.0.2
+│ │ │ │ └── protobufjs@7.5.5 deduped
+│ │ │ └── protobufjs@7.5.5 deduped
+│ │ └── protobufjs@7.5.5 deduped
+│ └─┬ @google-cloud/storage@7.19.0
+│   ├── fast-xml-parser@5.7.1 overridden
+│   └─┬ teeny-request@9.0.0
+│     └─┬ http-proxy-agent@5.0.0
+│       └── @tootallnate/once@3.0.1 overridden
+├─┬ firebase@12.11.0
+│ └─┬ @firebase/firestore@4.13.0
+│   └─┬ @grpc/proto-loader@0.7.15
+│     └── protobufjs@7.5.5 deduped
+└── vite@6.4.2
+

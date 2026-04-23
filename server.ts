@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type NextFunction, type Request, type Response } from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -7,11 +7,210 @@ import dotenv from "dotenv";
 import admin from "firebase-admin";
 import fs from "fs";
 import cors from "cors";
+import { GoogleGenAI, Type } from "@google/genai";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+type AuthenticatedRequest = Request & {
+  auth?: admin.auth.DecodedIdToken;
+};
+
+type RateLimitBucket = {
+  count: number;
+  resetAt: number;
+};
+
+type RateLimitOptions = {
+  windowMs: number;
+  maxRequests: number;
+  keyBuilder: (req: AuthenticatedRequest) => string | null;
+  label: string;
+};
+
+type CheckoutPayload = {
+  userId?: string;
+  userEmail?: string;
+  origin?: string;
+};
+
+function createFixedWindowRateLimiter(options: RateLimitOptions) {
+  const buckets = new Map<string, RateLimitBucket>();
+
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    const key = options.keyBuilder(req);
+    if (!key) {
+      next();
+      return;
+    }
+
+    const now = Date.now();
+    const existing = buckets.get(key);
+
+    if (!existing || existing.resetAt <= now) {
+      buckets.set(key, { count: 1, resetAt: now + options.windowMs });
+      next();
+      return;
+    }
+
+    if (existing.count >= options.maxRequests) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((existing.resetAt - now) / 1000));
+      res.setHeader("Retry-After", String(retryAfterSeconds));
+      res.status(429).json({ error: `Too many ${options.label} requests. Please try again shortly.` });
+      return;
+    }
+
+    existing.count += 1;
+
+    if (buckets.size > 10000) {
+      for (const [bucketKey, bucket] of buckets) {
+        if (bucket.resetAt <= now) {
+          buckets.delete(bucketKey);
+        }
+      }
+    }
+
+    next();
+  };
+}
+
+function stripCodeFence(text: string): string {
+  return text.replace(/```json\s*|\s*```/g, "").trim();
+}
+
+function parseJsonSafely(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function validateExistingTitles(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const sanitized = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+    .slice(0, 200);
+
+  if (sanitized.length === 0) {
+    return null;
+  }
+
+  return sanitized;
+}
+
+function validateIdeaTitle(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const sanitized = value.trim();
+  if (sanitized.length < 3 || sanitized.length > 120) {
+    return null;
+  }
+
+  return sanitized;
+}
+
+function normalizeOrigin(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function parseAllowedOrigins(value: string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0)
+    .map((origin) => normalizeOrigin(origin))
+    .filter((origin): origin is string => Boolean(origin));
+}
+
+function validateCheckoutPayload(value: unknown): { ok: true; payload: CheckoutPayload } | { ok: false; error: string } {
+  if (value === null || value === undefined) {
+    return { ok: true, payload: {} };
+  }
+
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, error: "Checkout payload must be a JSON object." };
+  }
+
+  const payload = value as Record<string, unknown>;
+  const allowedKeys = new Set(["userId", "userEmail", "origin"]);
+
+  for (const key of Object.keys(payload)) {
+    if (!allowedKeys.has(key)) {
+      return { ok: false, error: `Unexpected checkout payload field: ${key}.` };
+    }
+  }
+
+  if (payload.userId !== undefined && (typeof payload.userId !== "string" || payload.userId.length > 256)) {
+    return { ok: false, error: "userId must be a string up to 256 characters." };
+  }
+
+  if (
+    payload.userEmail !== undefined &&
+    (typeof payload.userEmail !== "string" || payload.userEmail.length > 320)
+  ) {
+    return { ok: false, error: "userEmail must be a string up to 320 characters." };
+  }
+
+  if (payload.origin !== undefined && (typeof payload.origin !== "string" || payload.origin.length > 2048)) {
+    return { ok: false, error: "origin must be a string up to 2048 characters." };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      userId: typeof payload.userId === "string" ? payload.userId : undefined,
+      userEmail: typeof payload.userEmail === "string" ? payload.userEmail : undefined,
+      origin: typeof payload.origin === "string" ? payload.origin : undefined,
+    },
+  };
+}
+
+function createBodySizeLimiter(limitBytes: number, label: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const contentLengthHeader = req.headers["content-length"];
+    if (typeof contentLengthHeader === "string") {
+      const contentLength = Number(contentLengthHeader);
+      if (Number.isFinite(contentLength) && contentLength > limitBytes) {
+        res.status(413).json({ error: `${label} payload is too large.` });
+        return;
+      }
+    }
+
+    const serializedBody = JSON.stringify(req.body ?? {});
+    if (Buffer.byteLength(serializedBody, "utf8") > limitBytes) {
+      res.status(413).json({ error: `${label} payload is too large.` });
+      return;
+    }
+
+    next();
+  };
+}
 
 async function startServer() {
   // Initialize Firebase Admin for audit compliance
@@ -48,7 +247,45 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(cors());
+  const defaultFrontendOrigins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8888",
+  ];
+  const approvedFrontendOrigins = Array.from(
+    new Set([...defaultFrontendOrigins, ...parseAllowedOrigins(process.env.FRONTEND_ORIGINS)])
+  );
+  const approvedFrontendOriginSet = new Set(approvedFrontendOrigins);
+  const configuredDefaultOrigin = normalizeOrigin(process.env.FRONTEND_DEFAULT_ORIGIN || "");
+  const checkoutDefaultOrigin =
+    configuredDefaultOrigin && approvedFrontendOriginSet.has(configuredDefaultOrigin)
+      ? configuredDefaultOrigin
+      : approvedFrontendOrigins[0] || null;
+
+  app.set("trust proxy", 1);
+
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        if (!origin) {
+          callback(null, true);
+          return;
+        }
+
+        const normalizedOrigin = normalizeOrigin(origin);
+        if (normalizedOrigin && approvedFrontendOriginSet.has(normalizedOrigin)) {
+          callback(null, true);
+          return;
+        }
+
+        callback(new Error("Origin not allowed by CORS."));
+      },
+      methods: ["GET", "POST", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "Stripe-Signature"],
+      credentials: true,
+    })
+  );
 
   // Initialize Stripe lazily
   let stripe: Stripe | null = null;
@@ -61,6 +298,101 @@ async function startServer() {
       stripe = new Stripe(key);
     }
     return stripe;
+  };
+
+  let gemini: GoogleGenAI | null = null;
+  const getGemini = () => {
+    if (!gemini) {
+      const key = process.env.GEMINI_API_KEY;
+      if (!key) {
+        throw new Error("GEMINI_API_KEY is required on the server.");
+      }
+      gemini = new GoogleGenAI({ apiKey: key });
+    }
+    return gemini;
+  };
+
+  const requireAuth = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    const authHeader = req.headers.authorization;
+    const bearerPrefix = "Bearer ";
+
+    if (!authHeader || !authHeader.startsWith(bearerPrefix)) {
+      res.status(401).json({ error: "Missing or invalid authorization token." });
+      return;
+    }
+
+    const token = authHeader.slice(bearerPrefix.length).trim();
+    if (!token) {
+      res.status(401).json({ error: "Missing or invalid authorization token." });
+      return;
+    }
+
+    if (admin.apps.length === 0) {
+      res.status(503).json({ error: "Authentication service unavailable." });
+      return;
+    }
+
+    try {
+      req.auth = await admin.auth().verifyIdToken(token);
+      next();
+    } catch (error) {
+      console.error("[Auth] Failed to verify Firebase ID token.", error);
+      res.status(401).json({ error: "Unauthorized request." });
+    }
+  };
+
+  const generationUserLimiter = createFixedWindowRateLimiter({
+    windowMs: 60_000,
+    maxRequests: 12,
+    keyBuilder: (req) => req.auth?.uid || null,
+    label: "generation",
+  });
+
+  const generationIpLimiter = createFixedWindowRateLimiter({
+    windowMs: 60_000,
+    maxRequests: 20,
+    keyBuilder: (req) => req.ip || null,
+    label: "generation",
+  });
+
+  const checkoutUserLimiter = createFixedWindowRateLimiter({
+    windowMs: 60_000,
+    maxRequests: 6,
+    keyBuilder: (req) => req.auth?.uid || null,
+    label: "checkout",
+  });
+
+  const checkoutIpLimiter = createFixedWindowRateLimiter({
+    windowMs: 60_000,
+    maxRequests: 12,
+    keyBuilder: (req) => req.ip || null,
+    label: "checkout",
+  });
+
+  const checkoutBodySizeLimiter = createBodySizeLimiter(2 * 1024, "checkout");
+
+  const resolveApprovedCheckoutOrigin = (req: Request): string | null => {
+    const candidateHeaders: string[] = [];
+
+    if (typeof req.headers.origin === "string") {
+      candidateHeaders.push(req.headers.origin);
+    }
+    if (typeof req.headers.referer === "string") {
+      candidateHeaders.push(req.headers.referer);
+    }
+
+    for (const candidate of candidateHeaders) {
+      const normalizedOrigin = normalizeOrigin(candidate);
+      if (normalizedOrigin && approvedFrontendOriginSet.has(normalizedOrigin)) {
+        return normalizedOrigin;
+      }
+    }
+
+    if (checkoutDefaultOrigin && approvedFrontendOriginSet.has(checkoutDefaultOrigin)) {
+      return checkoutDefaultOrigin;
+    }
+
+    return null;
   };
 
   // Stripe Webhook Endpoint (MUST be before express.json middleware)
@@ -119,22 +451,168 @@ async function startServer() {
     res.json({ received: true });
   });
 
-  app.use(express.json());
+  app.use(express.json({ limit: "32kb" }));
+
+  app.post(
+    "/api/ai/generate-ideas",
+    requireAuth,
+    generationUserLimiter,
+    generationIpLimiter,
+    async (req: AuthenticatedRequest, res: Response) => {
+      const existingTitles = validateExistingTitles(req.body?.existingTitles);
+      if (!existingTitles) {
+        res.status(400).json({ error: "existingTitles must be a non-empty array of strings." });
+        return;
+      }
+
+      const prompt = `You are an expert business consultant specializing in "simple" but highly profitable local service businesses.
+
+TASK: Generate 5 unique business ideas that are different from these existing ones: ${existingTitles.join(", ")}.
+
+GUARDRAILS:
+- Each business MUST have a startup cost under $5000.
+- Focus on simple, high-demand service or maintenance businesses (e.g., cleaning, repair, specialty labor).
+- Do NOT suggest digital-only businesses (SaaS, apps, etc.). These must be physical, local services.
+- Provide realistic startup cost ranges based on current market rates for equipment and licensing.
+- Include 4 specific, actionable customer acquisition strategies for each.
+- Ensure the "potentialIncome" is a realistic annual range for a solo operator or small team.
+
+OUTPUT FORMAT: Return a JSON array of objects following the specified schema.`;
+
+      try {
+        const response = await getGemini().models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING, description: "A unique UUID or short string ID" },
+                  title: { type: Type.STRING, description: "Catchy but professional business name" },
+                  category: {
+                    type: Type.STRING,
+                    description:
+                      "One of: Service, Maintenance, Automotive, Landscaping, Specialty, Seasonal, Cleaning",
+                  },
+                  description: {
+                    type: Type.STRING,
+                    description: "A 2-3 sentence compelling description of the opportunity",
+                  },
+                  startupCost: {
+                    type: Type.OBJECT,
+                    properties: {
+                      min: { type: Type.NUMBER },
+                      max: { type: Type.NUMBER },
+                    },
+                    required: ["min", "max"],
+                  },
+                  potentialIncome: {
+                    type: Type.STRING,
+                    description: "e.g., '$40,000 - $85,000/year'",
+                  },
+                  customerAcquisition: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: "4 specific strategies",
+                  },
+                },
+                required: [
+                  "id",
+                  "title",
+                  "category",
+                  "description",
+                  "startupCost",
+                  "potentialIncome",
+                  "customerAcquisition",
+                ],
+              },
+            },
+          },
+        });
+
+        const parsed = parseJsonSafely(stripCodeFence(response.text));
+        if (!Array.isArray(parsed)) {
+          res.status(502).json({ error: "AI returned an invalid ideas payload." });
+          return;
+        }
+
+        res.json({ ideas: parsed });
+      } catch (error) {
+        console.error("[AI] Failed to generate ideas.", error);
+        res.status(500).json({ error: "Failed to generate ideas." });
+      }
+    }
+  );
+
+  app.post(
+    "/api/ai/generate-brand-names",
+    requireAuth,
+    generationUserLimiter,
+    generationIpLimiter,
+    async (req: AuthenticatedRequest, res: Response) => {
+      const title = validateIdeaTitle(req.body?.ideaTitle);
+      if (!title) {
+        res.status(400).json({ error: "ideaTitle must be a string between 3 and 120 characters." });
+        return;
+      }
+
+      const prompt = `Generate 10 professional, catchy, and high-end business names for a "${title}" business. The names should sound established and trustworthy. Return ONLY a JSON array of strings.`;
+
+      try {
+        const response = await getGemini().models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: prompt,
+          config: { responseMimeType: "application/json" },
+        });
+
+        const parsed = parseJsonSafely(stripCodeFence(response.text));
+        const names = parseStringArray(parsed);
+        if (names.length === 0) {
+          res.status(502).json({ error: "AI returned an invalid brand name payload." });
+          return;
+        }
+
+        res.json({ names });
+      } catch (error) {
+        console.error("[AI] Failed to generate brand names.", error);
+        res.status(500).json({ error: "Failed to generate brand names." });
+      }
+    }
+  );
 
   // API Routes
-  app.post("/api/create-checkout-session", async (req, res) => {
+  app.post(
+    "/api/create-checkout-session",
+    requireAuth,
+    checkoutUserLimiter,
+    checkoutIpLimiter,
+    checkoutBodySizeLimiter,
+    async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { userId, userEmail, origin: bodyOrigin } = req.body;
-      
+      const payloadValidation = validateCheckoutPayload(req.body);
+      if ("error" in payloadValidation) {
+        return res.status(400).json({ error: payloadValidation.error });
+      }
+
+      const userId = req.auth?.uid;
+      const userEmail = req.auth?.email;
+
       if (!userId || !userEmail) {
-        return res.status(400).json({ error: "User ID and Email are required" });
+        return res.status(401).json({ error: "Authenticated user with email is required." });
+      }
+
+      const checkoutOrigin = resolveApprovedCheckoutOrigin(req);
+      if (!checkoutOrigin) {
+        return res.status(400).json({ error: "Request origin is not approved for checkout." });
       }
 
       console.log(`[Stripe] Creating checkout session for ${userEmail} (${userId})`);
 
       const stripeClient = getStripe();
-      const origin = bodyOrigin || req.headers.origin || `http://${req.headers.host}`;
-      
+
       const session = await stripeClient.checkout.sessions.create({
         mode: "payment",
         payment_method_types: ["card"],
@@ -155,8 +633,8 @@ async function startServer() {
             quantity: 1,
           },
         ],
-        success_url: `${origin}/?payment=success`,
-        cancel_url: `${origin}/?payment=cancel`,
+        success_url: `${checkoutOrigin}/?payment=success`,
+        cancel_url: `${checkoutOrigin}/?payment=cancel`,
       });
 
       res.json({ id: session.id, url: session.url });
@@ -164,7 +642,8 @@ async function startServer() {
       console.error("Stripe Error:", error);
       res.status(500).json({ error: error.message });
     }
-  });
+    }
+  );
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

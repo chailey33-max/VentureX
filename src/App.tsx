@@ -69,8 +69,7 @@ import {
 const CLEAN_BUSINESS_IDEAS = BUSINESS_IDEAS.filter(idea => idea !== undefined && idea !== null);
 
 import { BusinessIdea } from './types';
-import { generateNewIdeas } from './services/geminiService';
-import { GoogleGenAI, Type } from "@google/genai";
+import { generateBrandNames, generateNewIdeas } from './services/geminiService';
 
 // Firestore Error Handling
 enum OperationType {
@@ -106,6 +105,16 @@ const QUICK_TAGS = [
   { label: 'Passive', query: 'subscription recurring' },
   { label: 'Quick Launch', query: 'simple easy fast' }
 ];
+
+const LEGACY_ADMIN_EMAIL = 'chailey33@gmail.com';
+
+const isLegacyAdminEmail = (email: string | null | undefined) => {
+  return (email ?? '').toLowerCase() === LEGACY_ADMIN_EMAIL;
+};
+
+const hasAdminRoleClaim = (claims: Record<string, unknown>) => {
+  return claims.admin === true || claims.role === 'admin';
+};
 
 const CalculatorSection = ({ idea }: { idea: BusinessIdea }) => {
   const [price, setPrice] = useState(150);
@@ -489,6 +498,7 @@ const AuthModal = ({
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [isAdminByClaims, setIsAdminByClaims] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [activeTag, setActiveTag] = useState<string | null>(null);
@@ -564,13 +574,11 @@ export default function App() {
 
     if (isPermissionDenied) {
       const u = auth.currentUser;
-      const email = u?.email?.toLowerCase() ?? '';
-      const isUnverifiedChailey =
-        email === 'chailey33@gmail.com' && !!u && !u.emailVerified;
+      const isUnverifiedLegacyAdmin = isLegacyAdminEmail(u?.email) && !!u && !u.emailVerified;
       const pathStr = path ?? '';
       const isIdeasPath = pathStr.startsWith('ideas');
 
-      if (isUnverifiedChailey && isIdeasPath) {
+      if (isUnverifiedLegacyAdmin && isIdeasPath) {
         if (unverifiedIdeasPermissionToastShownRef.current) {
           return;
         }
@@ -640,7 +648,8 @@ export default function App() {
   const [checkedSteps, setCheckedSteps] = useState<string[]>([]);
   const [showCopied, setShowCopied] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
-  const hasAccess = isPaid || (user?.email?.toLowerCase() === 'chailey33@gmail.com');
+  const isLegacyAdminUser = isLegacyAdminEmail(user?.email);
+  const hasAccess = isPaid || isAdminByClaims || isLegacyAdminUser;
   const [showPaywall, setShowPaywall] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
@@ -732,14 +741,13 @@ export default function App() {
     setIsProcessingPayment(true);
     try {
       console.log('[Stripe] Initiating automated checkout via API...');
-      const payload = JSON.stringify({
-        userId: user.uid,
-        userEmail: user.email,
-      });
+      const token = await user.getIdToken();
+      const payload = JSON.stringify({});
       const requestInit: RequestInit = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
         },
         body: payload,
       };
@@ -799,8 +807,8 @@ export default function App() {
     };
   }, [selectedIdea, showPaywall, showPrivacy, showTerms, showComparison, showExecutionPlan]);
 
-  const isAdmin = (user?.email?.toLowerCase() === 'chailey33@gmail.com') && user?.emailVerified;
-  const isUnverifiedAdmin = (user?.email?.toLowerCase() === 'chailey33@gmail.com') && !user?.emailVerified;
+  const isAdmin = !!user && !!user.emailVerified && (isAdminByClaims || isLegacyAdminUser);
+  const isUnverifiedAdmin = isLegacyAdminUser && !user?.emailVerified;
 
   useEffect(() => {
     if (!user || user.emailVerified) {
@@ -816,8 +824,13 @@ export default function App() {
         // Sync user profile
         const userDocRef = doc(db, 'users', currentUser.uid);
         try {
+          const tokenResult = await currentUser.getIdTokenResult();
+          const claims = tokenResult.claims as Record<string, unknown>;
+          const isClaimAdminUser = hasAdminRoleClaim(claims);
+          setIsAdminByClaims(isClaimAdminUser);
+
           const userDoc = await getDoc(userDocRef);
-          const isAdminUser = currentUser.email?.toLowerCase() === 'chailey33@gmail.com';
+          const isAdminUser = isClaimAdminUser || isLegacyAdminEmail(currentUser.email);
           if (!userDoc.exists()) {
             // Create initial profile
             await setDoc(userDocRef, {
@@ -840,6 +853,7 @@ export default function App() {
           handleFirestoreError(error, OperationType.GET, `users/${currentUser.uid}`);
         }
       } else {
+        setIsAdminByClaims(false);
         setIsPaid(false);
         setFavorites([]);
         setCheckedSteps([]);
@@ -1363,17 +1377,19 @@ export default function App() {
   };
 
   const generateNames = async (idea: BusinessIdea) => {
+    if (!user) {
+      setAdminFeedback({ message: 'Please sign in to use AI naming.', type: 'info' });
+      setAuthMode('login');
+      setShowAuthModal(true);
+      return;
+    }
+
     setIsNaming(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Generate 10 professional, catchy, and high-end business names for a "${idea.title}" business. The names should sound established and trustworthy. Return ONLY a JSON array of strings.`,
-        config: { responseMimeType: "application/json" }
-      });
-      
-      const names = JSON.parse(response.text);
-      setGeneratedNames(prev => ({ ...prev, [idea.id]: names }));
+      const names = await generateBrandNames(idea.title);
+      if (names.length > 0) {
+        setGeneratedNames(prev => ({ ...prev, [idea.id]: names }));
+      }
     } catch (error) {
       console.error("Error generating names:", error);
     } finally {
@@ -1458,6 +1474,13 @@ export default function App() {
   }, [searchQuery, selectedCategory, activeTag, allIdeas, hasAccess, favorites]);
 
   const handleGenerateMore = async () => {
+    if (!user) {
+      setAdminFeedback({ message: 'Please sign in to generate more ideas.', type: 'info' });
+      setAuthMode('login');
+      setShowAuthModal(true);
+      return;
+    }
+
     setIsGenerating(true);
     try {
       const existingTitles = allIdeas.map(i => i.title);
@@ -1640,7 +1663,7 @@ export default function App() {
                 )}
                 <div className="hidden md:flex flex-col items-end">
                   <span className="text-[10px] text-gray-500 uppercase tracking-widest">
-                    {user?.email?.toLowerCase() === 'chailey33@gmail.com' ? 'Admin' : 'Member'}
+                    {isAdminByClaims || isLegacyAdminUser ? 'Admin' : 'Member'}
                   </span>
                   <span className="text-xs text-white font-medium">{user.email}</span>
                 </div>

@@ -32,17 +32,23 @@ service cloud.firestore {
       return resource.data;
     }
 
-    // Role Lookup
-    function getUserData(uid) {
-      return get(/databases/$(database)/documents/users/$(uid)).data;
+    function hasAdminClaim() {
+      return isSignedIn() &&
+             (
+               request.auth.token.admin == true ||
+               request.auth.token.role == 'admin'
+             );
+    }
+
+    function isLegacyAdminEmail() {
+      return isSignedIn() &&
+             request.auth.token.email is string &&
+             request.auth.token.email.lower() == 'chailey33@gmail.com' &&
+             request.auth.token.email_verified == true;
     }
 
     function isAdmin() {
-      return isSignedIn() && 
-        (
-          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData(request.auth.uid).role == 'admin') || 
-          (request.auth.token.email.lower() == 'chailey33@gmail.com' && request.auth.token.email_verified == true)
-        );
+      return hasAdminClaim() || isLegacyAdminEmail();
     }
 
     function isVerified() {
