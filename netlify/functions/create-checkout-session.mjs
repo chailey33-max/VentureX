@@ -34,6 +34,7 @@ const defaultFrontendOrigins = [
 const approvedFrontendOrigins = Array.from(
   new Set([...defaultFrontendOrigins, ...parseAllowedOrigins(process.env.FRONTEND_ORIGINS)])
 );
+const entitlementProductKey = process.env.ENTITLEMENT_PRODUCT_KEY || 'full_access_lifetime';
 const approvedFrontendOriginSet = new Set(approvedFrontendOrigins);
 const configuredDefaultOrigin = normalizeOrigin(process.env.FRONTEND_DEFAULT_ORIGIN || '');
 const checkoutDefaultOrigin =
@@ -284,6 +285,7 @@ export const handler = async event => {
       customer_email: userEmail,
       metadata: {
         userId: String(userId),
+        productKey: entitlementProductKey,
       },
       line_items: [
         {

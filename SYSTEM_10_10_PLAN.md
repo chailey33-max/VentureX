@@ -134,37 +134,37 @@ Eliminate immediate exploitation paths and close critical access-control gaps.
 Make payment/auth state authoritative, deterministic, and resilient.
 
 ### VULN-004 and VULN-007: Entitlement Drift and Client-Side Paid Writes
-- [ ] Remove client-side post-checkout `isPaid` write from [src/App.tsx](src/App.tsx).
-- [ ] Add server-authoritative payment verification endpoint.
-- [ ] Implement UI entitlement states: paymentPending, paymentVerified, paymentFailed.
-- [ ] Treat local paid cache as UX hint only and never as authorization source.
+- [x] Remove client-side post-checkout `isPaid` write from [src/App.tsx](src/App.tsx).
+- [x] Add server-authoritative payment verification endpoint in [server.ts](server.ts) and [netlify/functions/verify-entitlement.mjs](netlify/functions/verify-entitlement.mjs).
+- [x] Implement UI entitlement states: paymentPending, paymentVerified, paymentFailed in [src/App.tsx](src/App.tsx).
+- [x] Treat local paid cache as UX hint only and never as authorization source in [src/App.tsx](src/App.tsx).
 
 ### VULN-005: Dual Auth/Profile Subscription Paths
-- [ ] Replace dual mutation flows with one deterministic session bootstrap flow.
-- [ ] Introduce explicit state phases: auth-loading, profile-loading, ready, error.
-- [ ] Ensure single ownership path for `isPaid`, `favorites`, and `checkedSteps`.
-- [ ] Add cancellation guards for async effects to prevent stale updates.
+- [x] Replace dual mutation flows with one deterministic session bootstrap flow in [src/App.tsx](src/App.tsx).
+- [x] Introduce explicit state phases: auth-loading, profile-loading, ready, error in [src/App.tsx](src/App.tsx).
+- [x] Ensure single ownership path for `isPaid`, `favorites`, and `checkedSteps` in [src/App.tsx](src/App.tsx).
+- [x] Add cancellation guards for async effects to prevent stale updates in [src/App.tsx](src/App.tsx).
 
 ### VULN-006: Webhook Business-Rule Assertions and Replay Safety
-- [ ] Validate expected amount before granting entitlement.
-- [ ] Validate expected currency before granting entitlement.
-- [ ] Validate expected product/price identifier before granting entitlement.
-- [ ] Validate payment status and checkout mode before granting entitlement.
-- [ ] Add idempotency store for processed event IDs.
-- [ ] Add structured logging for all webhook decisions.
+- [x] Validate expected amount before granting entitlement.
+- [x] Validate expected currency before granting entitlement.
+- [x] Validate expected product/price identifier before granting entitlement.
+- [x] Validate payment status and checkout mode before granting entitlement.
+- [x] Add idempotency store for processed event IDs.
+- [x] Add structured logging for all webhook decisions.
 
 ### Bug Fixes (BUG-001 to BUG-004)
-- [ ] BUG-001: Add cleanup/abort protection for geolocation lifecycle.
-- [ ] BUG-002: Remove conflicting checkout success entitlement write path.
-- [ ] BUG-003: Debounce or batch IndexedDB modified-id writes.
-- [ ] BUG-004: Add robust restore-flow error recovery and fallback UX.
+- [x] BUG-001: Add cleanup/abort protection for geolocation lifecycle.
+- [x] BUG-002: Remove conflicting checkout success entitlement write path.
+- [x] BUG-003: Debounce or batch IndexedDB modified-id writes.
+- [x] BUG-004: Add robust restore-flow error recovery and fallback UX.
 
 ### Sprint 2 Exit Criteria
-- [ ] Entitlement is granted only by server-authoritative path.
-- [ ] Login/refresh/logout behavior is deterministic.
-- [ ] Webhook replay and invalid payment payloads cannot grant access.
-- [ ] BUG-001 through BUG-004 are closed with verification evidence.
-- [ ] No regressions in checkout UX and entitlement reflection flow.
+- [x] Entitlement is granted only by server-authoritative path. Evidence: [Sprint 2 exit verification](security/audit/sprint-2-exit-verification-2026-04-23.md).
+- [x] Login/refresh/logout behavior is deterministic. Evidence: [Sprint 2 exit verification](security/audit/sprint-2-exit-verification-2026-04-23.md).
+- [x] Webhook replay and invalid payment payloads cannot grant access. Evidence: [Sprint 2 exit verification](security/audit/sprint-2-exit-verification-2026-04-23.md).
+- [x] BUG-001 through BUG-004 are closed with verification evidence. Evidence: [Sprint 2 exit verification](security/audit/sprint-2-exit-verification-2026-04-23.md).
+- [x] No regressions in checkout UX and entitlement reflection flow. Evidence: [Sprint 2 exit verification](security/audit/sprint-2-exit-verification-2026-04-23.md).
 
 ---
 

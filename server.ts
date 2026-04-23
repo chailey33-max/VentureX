@@ -212,6 +212,41 @@ function createBodySizeLimiter(limitBytes: number, label: string) {
   };
 }
 
+const ENTITLEMENT_PRODUCT_KEY = process.env.ENTITLEMENT_PRODUCT_KEY || "full_access_lifetime";
+const EXPECTED_CHECKOUT_AMOUNT_CENTS = Number(process.env.EXPECTED_CHECKOUT_AMOUNT_CENTS || "4900");
+const EXPECTED_CHECKOUT_CURRENCY = (process.env.EXPECTED_CHECKOUT_CURRENCY || "usd").toLowerCase();
+const EXPECTED_CHECKOUT_MODE = process.env.EXPECTED_CHECKOUT_MODE || "payment";
+const EXPECTED_PAYMENT_STATUS = process.env.EXPECTED_PAYMENT_STATUS || "paid";
+const EXPECTED_STRIPE_PRICE_IDS = new Set(
+  (process.env.EXPECTED_STRIPE_PRICE_IDS || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+);
+
+function logWebhookDecision(
+  level: "info" | "warn" | "error",
+  payload: Record<string, unknown>
+) {
+  const entry = {
+    ts: new Date().toISOString(),
+    component: "stripe_webhook",
+    ...payload,
+  };
+
+  if (level === "error") {
+    console.error(JSON.stringify(entry));
+    return;
+  }
+
+  if (level === "warn") {
+    console.warn(JSON.stringify(entry));
+    return;
+  }
+
+  console.log(JSON.stringify(entry));
+}
+
 async function startServer() {
   // Initialize Firebase Admin for audit compliance
   try {
@@ -400,9 +435,10 @@ async function startServer() {
     const stripeClient = getStripe();
     const sig = req.headers["stripe-signature"];
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    let eventRef: FirebaseFirestore.DocumentReference | null = null;
 
     if (!webhookSecret) {
-      console.error("[Webhook] STRIPE_WEBHOOK_SECRET is missing.");
+      logWebhookDecision("error", { decision: "config_missing", reason: "STRIPE_WEBHOOK_SECRET missing" });
       return res.status(400).send("Webhook secret missing.");
     }
 
@@ -411,44 +447,159 @@ async function startServer() {
     try {
       event = stripeClient.webhooks.constructEvent(req.body, sig!, webhookSecret);
     } catch (err: any) {
-      console.error(`[Webhook] Signature verification failed: ${err.message}`);
+      logWebhookDecision("warn", {
+        decision: "signature_invalid",
+        reason: err.message,
+      });
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    // Handle the event
-    if (event.type === "checkout.session.completed") {
+    try {
+      const db = admin.firestore();
+      eventRef = db.collection("stripeWebhookEvents").doc(event.id);
+
+      try {
+        await eventRef.create({
+          eventId: event.id,
+          eventType: event.type,
+          status: "processing",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      } catch (err: any) {
+        if (err?.code === 6 || err?.code === "already-exists") {
+          logWebhookDecision("info", {
+            decision: "duplicate_ignored",
+            eventId: event.id,
+            eventType: event.type,
+          });
+          return res.json({ received: true, duplicate: true });
+        }
+        throw err;
+      }
+
+      if (event.type !== "checkout.session.completed") {
+        await eventRef.set(
+          {
+            status: "ignored",
+            reason: `unsupported_event:${event.type}`,
+            decidedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+        logWebhookDecision("info", {
+          decision: "ignored",
+          eventId: event.id,
+          eventType: event.type,
+        });
+        return res.json({ received: true });
+      }
+
       const session = event.data.object as Stripe.Checkout.Session;
       const userId = session.metadata?.userId;
       const userEmail = session.customer_email || session.customer_details?.email || null;
+      const sessionAmount = session.amount_total;
+      const sessionCurrency = (session.currency || "").toLowerCase();
+      const sessionMode = session.mode;
+      const paymentStatus = session.payment_status;
+      const productKey = session.metadata?.productKey;
 
-      console.log(`[Webhook] Payment successful for ${userEmail} (${userId})`);
-
-      if (userId) {
-        try {
-          const db = admin.firestore();
-          // Detailed fields as per audit suggestion
-          await db.collection("users").doc(userId).set({
-            email: userEmail,
-            isPaid: true,
-            role: "pro",
-            stripeCustomerEmail: userEmail,
-            stripeCheckoutSessionId: session.id,
-            plan: "full_access",
-            subscriptionStatus: "active",
-            paidAt: admin.firestore.FieldValue.serverTimestamp(),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          }, { merge: true });
-          
-          console.log(`[Webhook] User ${userId} successfully upgraded to PRO with audit-standard records.`);
-        } catch (dbErr) {
-          console.error("[Webhook] Firestore update error:", dbErr);
-        }
-      } else {
-        console.error("[Webhook] CRITICAL: Missing userId in Stripe metadata");
+      let hasExpectedPriceId = EXPECTED_STRIPE_PRICE_IDS.size === 0;
+      if (EXPECTED_STRIPE_PRICE_IDS.size > 0) {
+        const lineItems = await stripeClient.checkout.sessions.listLineItems(session.id, { limit: 25 });
+        hasExpectedPriceId = lineItems.data.some((item) => {
+          const priceRef = item.price;
+          const priceId = typeof priceRef === "string" ? priceRef : priceRef?.id;
+          return Boolean(priceId && EXPECTED_STRIPE_PRICE_IDS.has(priceId));
+        });
       }
-    }
 
-    res.json({ received: true });
+      const validationErrors: string[] = [];
+      if (!userId) validationErrors.push("missing_userId");
+      if (!userEmail) validationErrors.push("missing_userEmail");
+      if (sessionAmount !== EXPECTED_CHECKOUT_AMOUNT_CENTS) validationErrors.push("amount_mismatch");
+      if (sessionCurrency !== EXPECTED_CHECKOUT_CURRENCY) validationErrors.push("currency_mismatch");
+      if (sessionMode !== EXPECTED_CHECKOUT_MODE) validationErrors.push("mode_mismatch");
+      if (paymentStatus !== EXPECTED_PAYMENT_STATUS) validationErrors.push("payment_status_mismatch");
+      if (productKey !== ENTITLEMENT_PRODUCT_KEY) validationErrors.push("product_key_mismatch");
+      if (!hasExpectedPriceId) validationErrors.push("price_id_mismatch");
+
+      if (validationErrors.length > 0) {
+        await eventRef.set(
+          {
+            status: "rejected",
+            reasons: validationErrors,
+            sessionId: session.id,
+            userId: userId || null,
+            userEmail: userEmail || null,
+            amountTotal: sessionAmount ?? null,
+            currency: sessionCurrency || null,
+            mode: sessionMode || null,
+            paymentStatus: paymentStatus || null,
+            productKey: productKey || null,
+            decidedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+        logWebhookDecision("warn", {
+          decision: "rejected",
+          eventId: event.id,
+          sessionId: session.id,
+          userId: userId || null,
+          reasons: validationErrors,
+        });
+        return res.json({ received: true });
+      }
+
+      await db.collection("users").doc(userId!).set(
+        {
+          email: userEmail,
+          isPaid: true,
+          role: "pro",
+          stripeCustomerEmail: userEmail,
+          stripeCheckoutSessionId: session.id,
+          stripeProductKey: ENTITLEMENT_PRODUCT_KEY,
+          plan: "full_access",
+          subscriptionStatus: "active",
+          paidAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      await eventRef.set(
+        {
+          status: "processed",
+          sessionId: session.id,
+          userId: userId,
+          userEmail: userEmail,
+          amountTotal: sessionAmount,
+          currency: sessionCurrency,
+          mode: sessionMode,
+          paymentStatus: paymentStatus,
+          productKey: productKey || null,
+          decidedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      logWebhookDecision("info", {
+        decision: "processed",
+        eventId: event.id,
+        sessionId: session.id,
+        userId,
+      });
+      return res.json({ received: true });
+    } catch (err: any) {
+      if (eventRef) {
+        await eventRef.delete().catch(() => undefined);
+      }
+      logWebhookDecision("error", {
+        decision: "processing_error",
+        eventId: event?.id || null,
+        reason: err?.message || "unknown",
+      });
+      return res.status(500).json({ error: "Webhook processing failed." });
+    }
   });
 
   app.use(express.json({ limit: "32kb" }));
@@ -619,6 +770,7 @@ OUTPUT FORMAT: Return a JSON array of objects following the specified schema.`;
         customer_email: userEmail,
         metadata: {
           userId: String(userId),
+          productKey: ENTITLEMENT_PRODUCT_KEY,
         },
         line_items: [
           {
@@ -642,6 +794,37 @@ OUTPUT FORMAT: Return a JSON array of objects following the specified schema.`;
       console.error("Stripe Error:", error);
       res.status(500).json({ error: error.message });
     }
+    }
+  );
+
+  app.post(
+    "/api/billing/verify-entitlement",
+    requireAuth,
+    checkoutUserLimiter,
+    checkoutIpLimiter,
+    async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.auth?.uid;
+        if (!userId) {
+          return res.status(401).json({ error: "Authenticated user is required." });
+        }
+
+        if (admin.apps.length === 0) {
+          return res.status(503).json({ error: "Authentication service unavailable." });
+        }
+
+        const snapshot = await admin.firestore().collection("users").doc(userId).get();
+        const data = snapshot.exists ? snapshot.data() : null;
+        const isPaid = data?.isPaid === true || data?.role === "pro";
+
+        return res.json({
+          status: isPaid ? "paymentVerified" : "paymentPending",
+          isPaid,
+        });
+      } catch (error: any) {
+        console.error("[Billing] Failed to verify entitlement.", error);
+        return res.status(500).json({ error: "Failed to verify entitlement." });
+      }
     }
   );
 

@@ -96,6 +96,9 @@ interface FirestoreErrorInfo {
   }
 }
 
+type EntitlementState = 'paymentPending' | 'paymentVerified' | 'paymentFailed' | null;
+type SessionPhase = 'auth-loading' | 'profile-loading' | 'ready' | 'error';
+
 
 const CATEGORIES = ['All', 'Shortlisted', 'Service', 'Maintenance', 'Automotive', 'Landscaping', 'Specialty', 'Seasonal', 'Cleaning', 'Real Estate', 'Passive Income', 'Creative', 'Event Service', 'Education', 'Beauty'];
 
@@ -542,7 +545,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState<'login' | 'signup' | 'forgot'>('login');
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
-  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [sessionPhase, setSessionPhase] = useState<SessionPhase>('auth-loading');
 
   const handleFirestoreError = (
     error: unknown,
@@ -651,13 +654,23 @@ export default function App() {
   const [checkedSteps, setCheckedSteps] = useState<string[]>([]);
   const [showCopied, setShowCopied] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
+  const [entitlementState, setEntitlementState] = useState<EntitlementState>(null);
+  const [localPaidHint, setLocalPaidHint] = useState(false);
   const isLegacyAdminUser = isLegacyAdminEmail(user?.email);
   const hasAccess = isPaid || isAdminByClaims || isLegacyAdminUser;
+  const isAuthReady = sessionPhase === 'ready' || sessionPhase === 'error';
   const [showPaywall, setShowPaywall] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [modifiedIds, setModifiedIds] = useState<Set<string>>(new Set());
+  const modifiedIdsPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localProfileCacheRef = useRef<{ favorites: string[]; checkedSteps: string[]; paidHint: boolean }>({
+    favorites: [],
+    checkedSteps: [],
+    paidHint: false,
+  });
+  const migratedProfileUidRef = useRef<string | null>(null);
 
   // Load modifiedIds from IndexedDB
   useEffect(() => {
@@ -676,46 +689,178 @@ export default function App() {
 
   // Save modifiedIds to IndexedDB
   useEffect(() => {
-    set('venturex_modified', JSON.stringify(Array.from(modifiedIds)));
+    if (modifiedIdsPersistTimerRef.current) {
+      clearTimeout(modifiedIdsPersistTimerRef.current);
+    }
+    modifiedIdsPersistTimerRef.current = setTimeout(() => {
+      set('venturex_modified', JSON.stringify(Array.from(modifiedIds)));
+      modifiedIdsPersistTimerRef.current = null;
+    }, 300);
+    return () => {
+      if (modifiedIdsPersistTimerRef.current) {
+        clearTimeout(modifiedIdsPersistTimerRef.current);
+        modifiedIdsPersistTimerRef.current = null;
+      }
+    };
   }, [modifiedIds]);
 
-  // Handle Stripe Payment Success Redirect
+  const verifyEntitlement = async (): Promise<{ status: EntitlementState; isPaid: boolean }> => {
+    if (!user) {
+      return { status: 'paymentFailed', isPaid: false };
+    }
+
+    const token = await user.getIdToken();
+    const requestInit: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({}),
+    };
+
+    let response = await fetch('/api/billing/verify-entitlement', requestInit);
+    let rawBody = await response.text();
+
+    if (rawBody.trim().startsWith('<!DOCTYPE') || rawBody.trim().startsWith('<html') || response.status === 404) {
+      response = await fetch('/.netlify/functions/verify-entitlement', requestInit);
+      rawBody = await response.text();
+    }
+
+    let parsed: any = null;
+    if (rawBody) {
+      try {
+        parsed = JSON.parse(rawBody);
+      } catch {
+        throw new Error('Server returned invalid response format.');
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error(parsed?.error || `Server error: ${response.status}`);
+    }
+
+    return {
+      status: parsed?.status === 'paymentVerified' ? 'paymentVerified' : 'paymentPending',
+      isPaid: parsed?.isPaid === true,
+    };
+  };
+
+  // Handle Stripe Payment Success/Cancel Redirect with server-authoritative verification
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('payment') === 'success' && user) {
+    const paymentResult = params.get('payment');
+    if (!paymentResult) return;
+    let isCancelled = false;
+
+    if (paymentResult === 'cancel') {
+      setEntitlementState('paymentFailed');
+      setAdminFeedback({
+        message: 'Payment was cancelled. You can retry anytime.',
+        type: 'info',
+      });
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return;
+    }
+
+    if (paymentResult === 'success' && user) {
       const finalizePayment = async () => {
-        const userDocRef = doc(db, 'users', user.uid);
+        setEntitlementState('paymentPending');
         try {
-          await updateDoc(userDocRef, { isPaid: true });
-          setIsPaid(true);
-          setAdminFeedback({ 
-            message: 'Payment confirmed! Welcome to Business Ventures Premium.', 
-            type: 'success' 
-          });
-          // Clean up URL
+          // Webhook reconciliation can be slightly delayed; poll verify endpoint briefly.
+          let verified = false;
+          for (let attempt = 0; attempt < 6; attempt += 1) {
+            if (isCancelled) return;
+            const result = await verifyEntitlement();
+            if (result.status === 'paymentVerified' && result.isPaid) {
+              verified = true;
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+          }
+
+          if (verified) {
+            if (isCancelled) return;
+            setEntitlementState('paymentVerified');
+            setAdminFeedback({
+              message: 'Payment confirmed! Welcome to Business Ventures Premium.',
+              type: 'success',
+            });
+          } else {
+            if (isCancelled) return;
+            setEntitlementState('paymentPending');
+            setAdminFeedback({
+              message: 'Payment received. Access is being confirmed securely. Please refresh in a moment.',
+              type: 'info',
+            });
+          }
+
           window.history.replaceState({}, document.title, window.location.pathname);
         } catch (error) {
-          console.error("Error updating payment status:", error);
+          console.error('Error verifying payment status:', error);
+          if (isCancelled) return;
+          setEntitlementState('paymentFailed');
+          setAdminFeedback({
+            message: 'Could not verify payment yet. Please refresh shortly.',
+            type: 'error',
+          });
         }
       };
       finalizePayment();
     }
+    return () => {
+      isCancelled = true;
+    };
   }, [user]);
 
-  // Sync Paid Status and User Data from Firestore
+  // Deterministic profile bootstrap + single ownership for entitlement/profile state.
   useEffect(() => {
     if (!user) {
       setIsPaid(false);
+      setFavorites([]);
+      setCheckedSteps([]);
+      migratedProfileUidRef.current = null;
       return;
     }
 
+    setSessionPhase('profile-loading');
+    let isCancelled = false;
+
     const userDocRef = doc(db, 'users', user.uid);
     const unsubscribe = onSnapshot(userDocRef, (doc) => {
+      if (isCancelled) return;
       if (doc.exists()) {
         const data = doc.data();
         setIsPaid(data.isPaid === true || data.role === 'pro');
         setFavorites(Array.isArray(data.favorites) ? data.favorites : []);
         setCheckedSteps(Array.isArray(data.checkedSteps) ? data.checkedSteps : []);
+
+        // One-time migration of local profile cache only when remote is empty.
+        if (migratedProfileUidRef.current !== user.uid) {
+          const cached = localProfileCacheRef.current;
+          const updates: Record<string, unknown> = {};
+          const remoteFavorites = Array.isArray(data.favorites) ? data.favorites : [];
+          const remoteSteps = Array.isArray(data.checkedSteps) ? data.checkedSteps : [];
+
+          if (remoteFavorites.length === 0 && cached.favorites.length > 0) {
+            updates.favorites = cached.favorites;
+          }
+
+          if (remoteSteps.length === 0 && cached.checkedSteps.length > 0) {
+            updates.checkedSteps = cached.checkedSteps;
+          }
+
+          if (Object.keys(updates).length > 0) {
+            updateDoc(userDocRef, {
+              ...updates,
+              updatedAt: serverTimestamp(),
+            }).catch((err) =>
+              handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`, 'background')
+            );
+          }
+          migratedProfileUidRef.current = user.uid;
+        }
+        setSessionPhase('ready');
       } else {
         // Create user doc if it doesn't exist
         setDoc(userDocRef, {
@@ -723,16 +868,26 @@ export default function App() {
           email: user.email,
           createdAt: serverTimestamp(),
           isPaid: false,
-          role: 'user'
+          role: 'user',
+          favorites: [],
+          checkedSteps: []
         }).catch(err =>
           handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`, 'background')
         );
       }
     }, (error) =>
-      handleFirestoreError(error, OperationType.GET, `users/${user.uid}`, 'listener')
+      {
+        if (!isCancelled) {
+          setSessionPhase('error');
+        }
+        handleFirestoreError(error, OperationType.GET, `users/${user.uid}`, 'listener');
+      }
     );
 
-    return () => unsubscribe();
+    return () => {
+      isCancelled = true;
+      unsubscribe();
+    };
   }, [user]);
 
   const handleStripeCheckout = async () => {
@@ -821,38 +976,24 @@ export default function App() {
 
   // Firebase Auth Listener
   useEffect(() => {
+    setSessionPhase('auth-loading');
+    let isCancelled = false;
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (isCancelled) return;
       setUser(currentUser);
       if (currentUser) {
-        // Sync user profile
-        const userDocRef = doc(db, 'users', currentUser.uid);
+        setSessionPhase('profile-loading');
         try {
           const tokenResult = await currentUser.getIdTokenResult();
+          if (isCancelled) return;
           const claims = tokenResult.claims as Record<string, unknown>;
           const isClaimAdminUser = hasAdminRoleClaim(claims);
           setIsAdminByClaims(isClaimAdminUser);
-
-          const userDoc = await getDoc(userDocRef);
-          const isAdminUser = isClaimAdminUser || isLegacyAdminEmail(currentUser.email);
-          if (!userDoc.exists()) {
-            // Create initial profile
-            await setDoc(userDocRef, {
-              uid: currentUser.uid,
-              email: currentUser.email,
-              createdAt: serverTimestamp(),
-              isPaid: false,
-              role: 'user',
-              favorites: [],
-              checkedSteps: []
-            });
-            setIsPaid(isAdminUser);
-          } else {
-            const data = userDoc.data();
-            setIsPaid(data.isPaid === true || data.role === 'pro' || isAdminUser);
-            setFavorites(Array.isArray(data.favorites) ? data.favorites : []);
-            setCheckedSteps(Array.isArray(data.checkedSteps) ? data.checkedSteps : []);
-          }
         } catch (error) {
+          if (!isCancelled) {
+            setSessionPhase('error');
+          }
           handleFirestoreError(error, OperationType.GET, `users/${currentUser.uid}`);
         }
       } else {
@@ -860,10 +1001,14 @@ export default function App() {
         setIsPaid(false);
         setFavorites([]);
         setCheckedSteps([]);
+        setSessionPhase('ready');
       }
-      setIsAuthReady(true);
     });
-    return () => unsubscribe();
+
+    return () => {
+      isCancelled = true;
+      unsubscribe();
+    };
   }, []);
 
   // Sync Global Ideas from Firestore (rules require auth — skip listener when signed out)
@@ -911,60 +1056,54 @@ export default function App() {
     return () => unsubscribe();
   }, [isLoading, user, isAdmin, isUnverifiedAdmin]);
 
-  // Migration: Sync local data to Firestore when user logs in
-  useEffect(() => {
-    if (!user || isLoading) return;
-
-    const migrateData = async () => {
-      const userDocRef = doc(db, 'users', user.uid);
-      try {
-        const userDoc = await getDoc(userDocRef);
-        if (userDoc.exists()) {
-          const remoteData = userDoc.data();
-          
-          // If remote is empty but local has data, migrate local to remote
-          const updates: any = {};
-          
-          if ((!remoteData.favorites || remoteData.favorites.length === 0) && favorites.length > 0) {
-            updates.favorites = favorites;
-          }
-          
-          if ((!remoteData.checkedSteps || remoteData.checkedSteps.length === 0) && checkedSteps.length > 0) {
-            updates.checkedSteps = checkedSteps;
-          }
-
-          if (Object.keys(updates).length > 0) {
-            updates.updatedAt = serverTimestamp();
-            await updateDoc(userDocRef, updates);
-            console.log('Migrated local data to Firestore');
-          }
-        }
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`, 'background');
-      }
-    };
-
-    migrateData();
-  }, [user, isLoading]);
-
   // Get user location for "Trending" feature
   useEffect(() => {
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(async (position) => {
+    if (!("geolocation" in navigator)) return;
+
+    let isCancelled = false;
+    const controller = new AbortController();
+    const geoTimeoutId = window.setTimeout(() => controller.abort(), 8000);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        if (isCancelled) return;
         try {
-          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${position.coords.latitude}&lon=${position.coords.longitude}`);
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${position.coords.latitude}&lon=${position.coords.longitude}`,
+            { signal: controller.signal }
+          );
           const data = await res.json();
           const city = data.address.city || data.address.town || data.address.village || 'your area';
-          setUserLocation(city);
-        } catch (e) {
-          console.error("Error fetching location name:", e);
+          if (!isCancelled) {
+            setUserLocation(city);
+          }
+        } catch (e: any) {
+          if (e?.name !== 'AbortError') {
+            console.error("Error fetching location name:", e);
+          }
+        } finally {
+          window.clearTimeout(geoTimeoutId);
         }
-      });
-    }
+      },
+      (error) => {
+        window.clearTimeout(geoTimeoutId);
+        if (!isCancelled) {
+          console.warn('Geolocation unavailable:', error?.message || error);
+        }
+      },
+      { enableHighAccuracy: false, timeout: 7000, maximumAge: 60_000 }
+    );
+
+    return () => {
+      isCancelled = true;
+      controller.abort();
+      window.clearTimeout(geoTimeoutId);
+    };
   }, []);
 
   // Initial load from IndexedDB
   useEffect(() => {
+    let isCancelled = false;
     const loadIdeas = async () => {
       try {
         const saved = await get('venturex_ideas') || await get('boring_ventures_ideas');
@@ -972,22 +1111,30 @@ export default function App() {
         const savedSteps = await get('venturex_steps') || await get('boring_ventures_steps');
         const savedPaid = await get('venturex_paid') || await get('boring_ventures_paid');
         const legacySaved = localStorage.getItem('venturex_ideas') || localStorage.getItem('boring_ventures_ideas');
+
+        const parsedLocalFavorites = savedFavs ? JSON.parse(savedFavs) : [];
+        const parsedLocalSteps = savedSteps ? JSON.parse(savedSteps) : [];
+        const parsedLocalPaidHint = savedPaid ? Boolean(JSON.parse(savedPaid)) : false;
+        localProfileCacheRef.current = {
+          favorites: Array.isArray(parsedLocalFavorites) ? parsedLocalFavorites : [],
+          checkedSteps: Array.isArray(parsedLocalSteps) ? parsedLocalSteps : [],
+          paidHint: parsedLocalPaidHint,
+        };
         
         // For signed-in users, Firestore profile is authoritative.
         // Avoid stale local cache overwriting server state after auth hydration.
         const shouldHydrateFromLocalProfile = !auth.currentUser;
         if (shouldHydrateFromLocalProfile) {
-          if (savedFavs) {
-            setFavorites(JSON.parse(savedFavs));
+          if (localProfileCacheRef.current.favorites.length > 0) {
+            setFavorites(localProfileCacheRef.current.favorites);
           }
 
-          if (savedSteps) {
-            setCheckedSteps(JSON.parse(savedSteps));
+          if (localProfileCacheRef.current.checkedSteps.length > 0) {
+            setCheckedSteps(localProfileCacheRef.current.checkedSteps);
           }
 
           if (savedPaid) {
-            const paidStatus = JSON.parse(savedPaid);
-            setIsPaid(prev => prev || paidStatus);
+            setLocalPaidHint(localProfileCacheRef.current.paidHint);
           }
         }
 
@@ -1039,14 +1186,22 @@ export default function App() {
           }
         }
         
-        setAllIdeas(ideasToUse);
+        if (!isCancelled) {
+          setAllIdeas(ideasToUse);
+        }
       } catch (e) {
         console.error('Error loading saved ideas:', e);
       } finally {
-        setIsLoading(false);
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
       }
     };
+
     loadIdeas();
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   // Save to IndexedDB whenever ideas change
@@ -1059,6 +1214,16 @@ export default function App() {
     if (isLoading) return;
     set('venturex_paid', JSON.stringify(isPaid));
   }, [isPaid, isLoading]);
+
+  useEffect(() => {
+    if (isPaid) {
+      setEntitlementState('paymentVerified');
+      return;
+    }
+    if (entitlementState === 'paymentVerified') {
+      setEntitlementState(null);
+    }
+  }, [isPaid]);
 
   useEffect(() => {
     if (isLoading) return; // Don't save during initial load
@@ -1149,21 +1314,64 @@ export default function App() {
 
   const restoreFromFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        try {
-          const ideas = JSON.parse(event.target?.result as string);
-          if (Array.isArray(ideas)) {
-            setAllIdeas(ideas);
-            setAdminFeedback({ message: 'Restored from file! Click "Sync to Cloud" to save.', type: 'success' });
-          }
-        } catch (err) {
-          setAdminFeedback({ message: 'Invalid backup file.', type: 'error' });
+    if (!file) return;
+
+    const previousIdeas = allIdeas;
+    const reader = new FileReader();
+    reader.onerror = () => {
+      setAdminFeedback({ message: 'Could not read backup file. Your current data is unchanged.', type: 'error' });
+    };
+    reader.onload = (event) => {
+      try {
+        const raw = event.target?.result as string;
+        const parsed = JSON.parse(raw);
+
+        if (!Array.isArray(parsed)) {
+          throw new Error('Backup format must be an array of ideas.');
         }
-      };
-      reader.readAsText(file);
-    }
+
+        const validIdeas = parsed.filter((idea: any) => {
+          return Boolean(
+            idea &&
+              typeof idea.id === 'string' &&
+              typeof idea.title === 'string' &&
+              typeof idea.category === 'string' &&
+              typeof idea.description === 'string' &&
+              idea.startupCost &&
+              typeof idea.startupCost.min === 'number' &&
+              typeof idea.startupCost.max === 'number' &&
+              Array.isArray(idea.customerAcquisition)
+          );
+        }) as BusinessIdea[];
+
+        if (validIdeas.length === 0) {
+          throw new Error('Backup file has no valid ideas.');
+        }
+
+        const mergedWithDefaults = [...validIdeas];
+        CLEAN_BUSINESS_IDEAS.forEach((def) => {
+          if (!mergedWithDefaults.some((item) => item.id === def.id)) {
+            mergedWithDefaults.push(def);
+          }
+        });
+
+        setAllIdeas(mergedWithDefaults);
+        setModifiedIds(new Set(mergedWithDefaults.map((idea) => idea.id)));
+        setAdminFeedback({
+          message: `Restored ${validIdeas.length} ideas from backup. Missing defaults were safely re-added.`,
+          type: 'success',
+        });
+      } catch (err: any) {
+        setAllIdeas(previousIdeas);
+        setAdminFeedback({
+          message: `Restore failed: ${err?.message || 'Invalid backup file.'} Current data was preserved.`,
+          type: 'error',
+        });
+      } finally {
+        e.target.value = '';
+      }
+    };
+    reader.readAsText(file);
   };
 
   const forceResetToDefaults = () => {
@@ -2960,6 +3168,28 @@ export default function App() {
                       </>
                     )}
                   </button>
+                )}
+
+                {user && entitlementState && (
+                  <p
+                    className={`mt-4 text-center text-xs ${
+                      entitlementState === 'paymentVerified'
+                        ? 'text-green-400'
+                        : entitlementState === 'paymentFailed'
+                          ? 'text-red-400'
+                          : 'text-gold'
+                    }`}
+                  >
+                    {entitlementState === 'paymentPending' && 'Payment pending verification...'}
+                    {entitlementState === 'paymentVerified' && 'Payment verified. Premium access is active.'}
+                    {entitlementState === 'paymentFailed' && 'Payment verification failed. Please try again.'}
+                  </p>
+                )}
+
+                {user && !isPaid && localPaidHint && (
+                  <p className="mt-2 text-center text-[11px] text-gray-400">
+                    Previous local premium cache found. Access is granted only after server verification.
+                  </p>
                 )}
 
                 {/* Secure payment message */}
