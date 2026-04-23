@@ -36,6 +36,8 @@ type CheckoutPayload = {
   origin?: string;
 };
 
+type VerifyEntitlementPayload = Record<string, never>;
+
 function createFixedWindowRateLimiter(options: RateLimitOptions) {
   const buckets = new Map<string, RateLimitBucket>();
 
@@ -57,6 +59,12 @@ function createFixedWindowRateLimiter(options: RateLimitOptions) {
 
     if (existing.count >= options.maxRequests) {
       const retryAfterSeconds = Math.max(1, Math.ceil((existing.resetAt - now) / 1000));
+      recordAbuseSignal({
+        scope: "rate_limit",
+        key,
+        reason: `too_many_${options.label}_requests`,
+        metadata: { label: options.label, retryAfterSeconds },
+      });
       res.setHeader("Retry-After", String(retryAfterSeconds));
       res.status(429).json({ error: `Too many ${options.label} requests. Please try again shortly.` });
       return;
@@ -197,6 +205,12 @@ function createBodySizeLimiter(limitBytes: number, label: string) {
     if (typeof contentLengthHeader === "string") {
       const contentLength = Number(contentLengthHeader);
       if (Number.isFinite(contentLength) && contentLength > limitBytes) {
+        recordAbuseSignal({
+          scope: "payload",
+          key: `ip:${req.ip || "unknown"}`,
+          reason: `${label}_payload_too_large`,
+          metadata: { contentLength, limitBytes },
+        });
         res.status(413).json({ error: `${label} payload is too large.` });
         return;
       }
@@ -204,12 +218,36 @@ function createBodySizeLimiter(limitBytes: number, label: string) {
 
     const serializedBody = JSON.stringify(req.body ?? {});
     if (Buffer.byteLength(serializedBody, "utf8") > limitBytes) {
+      recordAbuseSignal({
+        scope: "payload",
+        key: `ip:${req.ip || "unknown"}`,
+        reason: `${label}_payload_too_large`,
+        metadata: { serializedLength: Buffer.byteLength(serializedBody, "utf8"), limitBytes },
+      });
       res.status(413).json({ error: `${label} payload is too large.` });
       return;
     }
 
     next();
   };
+}
+
+function validateVerifyEntitlementPayload(
+  value: unknown
+): { ok: true; payload: VerifyEntitlementPayload } | { ok: false; error: string } {
+  if (value === null || value === undefined) {
+    return { ok: true, payload: {} };
+  }
+
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, error: "Verify entitlement payload must be a JSON object." };
+  }
+
+  if (Object.keys(value as Record<string, unknown>).length > 0) {
+    return { ok: false, error: "Verify entitlement payload must be empty." };
+  }
+
+  return { ok: true, payload: {} };
 }
 
 const ENTITLEMENT_PRODUCT_KEY = process.env.ENTITLEMENT_PRODUCT_KEY || "full_access_lifetime";
@@ -245,6 +283,51 @@ function logWebhookDecision(
   }
 
   console.log(JSON.stringify(entry));
+}
+
+type AbuseSignal = {
+  scope: string;
+  key: string;
+  reason: string;
+  metadata?: Record<string, unknown>;
+};
+
+const abuseSignalBuckets = new Map<string, { count: number; firstSeen: number; lastSeen: number }>();
+
+function recordAbuseSignal(signal: AbuseSignal) {
+  const now = Date.now();
+  const bucketKey = `${signal.scope}:${signal.key}:${signal.reason}`;
+  const existing = abuseSignalBuckets.get(bucketKey);
+  const next = existing
+    ? { count: existing.count + 1, firstSeen: existing.firstSeen, lastSeen: now }
+    : { count: 1, firstSeen: now, lastSeen: now };
+  abuseSignalBuckets.set(bucketKey, next);
+
+  if (abuseSignalBuckets.size > 20000) {
+    for (const [key, value] of abuseSignalBuckets) {
+      if (now - value.lastSeen > 60 * 60 * 1000) {
+        abuseSignalBuckets.delete(key);
+      }
+    }
+  }
+
+  const shouldAlert = next.count === 5 || next.count === 10 || next.count % 25 === 0;
+  const payload = {
+    ts: new Date().toISOString(),
+    component: "abuse_monitor",
+    level: shouldAlert ? "alert" : "info",
+    scope: signal.scope,
+    key: signal.key,
+    reason: signal.reason,
+    count: next.count,
+    windowMs: now - next.firstSeen,
+    ...(signal.metadata ? { metadata: signal.metadata } : {}),
+  };
+  if (shouldAlert) {
+    console.warn(JSON.stringify(payload));
+  } else {
+    console.log(JSON.stringify(payload));
+  }
 }
 
 async function startServer() {
@@ -292,6 +375,19 @@ async function startServer() {
     new Set([...defaultFrontendOrigins, ...parseAllowedOrigins(process.env.FRONTEND_ORIGINS)])
   );
   const approvedFrontendOriginSet = new Set(approvedFrontendOrigins);
+  const cspConnectOrigins = Array.from(
+    new Set([
+      ...approvedFrontendOrigins,
+      "https://api.stripe.com",
+      "https://js.stripe.com",
+      "https://firestore.googleapis.com",
+      "https://firebase.googleapis.com",
+      "https://securetoken.googleapis.com",
+      "https://identitytoolkit.googleapis.com",
+      "https://www.googleapis.com",
+      "https://nominatim.openstreetmap.org",
+    ])
+  );
   const configuredDefaultOrigin = normalizeOrigin(process.env.FRONTEND_DEFAULT_ORIGIN || "");
   const checkoutDefaultOrigin =
     configuredDefaultOrigin && approvedFrontendOriginSet.has(configuredDefaultOrigin)
@@ -321,6 +417,40 @@ async function startServer() {
       credentials: true,
     })
   );
+
+  app.use((req, res, next) => {
+    const csp = [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'none'",
+      "form-action 'self' https://checkout.stripe.com",
+      "img-src 'self' data: https:",
+      "font-src 'self' data:",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "script-src 'self' 'unsafe-inline' https://js.stripe.com",
+      `connect-src 'self' ${cspConnectOrigins.join(" ")}`,
+      "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com",
+      "worker-src 'self' blob:",
+      "upgrade-insecure-requests",
+    ].join("; ");
+
+    res.setHeader("Content-Security-Policy", csp);
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    res.setHeader("Cross-Origin-Resource-Policy", "same-site");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Permissions-Policy", "geolocation=(self), camera=(), microphone=()");
+
+    const forwardedProto = req.headers["x-forwarded-proto"];
+    const isHttps = req.secure || (typeof forwardedProto === "string" && forwardedProto.includes("https"));
+    if (isHttps) {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+    }
+
+    next();
+  });
 
   // Initialize Stripe lazily
   let stripe: Stripe | null = null;
@@ -352,12 +482,22 @@ async function startServer() {
     const bearerPrefix = "Bearer ";
 
     if (!authHeader || !authHeader.startsWith(bearerPrefix)) {
+      recordAbuseSignal({
+        scope: "auth",
+        key: `ip:${req.ip || "unknown"}`,
+        reason: "missing_or_invalid_auth_header",
+      });
       res.status(401).json({ error: "Missing or invalid authorization token." });
       return;
     }
 
     const token = authHeader.slice(bearerPrefix.length).trim();
     if (!token) {
+      recordAbuseSignal({
+        scope: "auth",
+        key: `ip:${req.ip || "unknown"}`,
+        reason: "empty_bearer_token",
+      });
       res.status(401).json({ error: "Missing or invalid authorization token." });
       return;
     }
@@ -372,6 +512,11 @@ async function startServer() {
       next();
     } catch (error) {
       console.error("[Auth] Failed to verify Firebase ID token.", error);
+      recordAbuseSignal({
+        scope: "auth",
+        key: `ip:${req.ip || "unknown"}`,
+        reason: "token_verification_failed",
+      });
       res.status(401).json({ error: "Unauthorized request." });
     }
   };
@@ -405,6 +550,29 @@ async function startServer() {
   });
 
   const checkoutBodySizeLimiter = createBodySizeLimiter(2 * 1024, "checkout");
+  const verifyBodySizeLimiter = createBodySizeLimiter(1024, "verify-entitlement");
+  const webhookBodySizeLimiter = createBodySizeLimiter(100 * 1024, "stripe-webhook");
+
+  const verifyUserLimiter = createFixedWindowRateLimiter({
+    windowMs: 60_000,
+    maxRequests: 24,
+    keyBuilder: (req) => req.auth?.uid || null,
+    label: "verify-entitlement",
+  });
+
+  const verifyIpLimiter = createFixedWindowRateLimiter({
+    windowMs: 60_000,
+    maxRequests: 48,
+    keyBuilder: (req) => req.ip || null,
+    label: "verify-entitlement",
+  });
+
+  const webhookIpLimiter = createFixedWindowRateLimiter({
+    windowMs: 60_000,
+    maxRequests: 120,
+    keyBuilder: (req) => req.ip || null,
+    label: "stripe-webhook",
+  });
 
   const resolveApprovedCheckoutOrigin = (req: Request): string | null => {
     const candidateHeaders: string[] = [];
@@ -431,7 +599,12 @@ async function startServer() {
   };
 
   // Stripe Webhook Endpoint (MUST be before express.json middleware)
-  app.post("/api/stripe-webhook", express.raw({ type: "application/json" }), async (req, res) => {
+  app.post(
+    "/api/stripe-webhook",
+    express.raw({ type: "application/json" }),
+    webhookBodySizeLimiter,
+    webhookIpLimiter,
+    async (req, res) => {
     const stripeClient = getStripe();
     const sig = req.headers["stripe-signature"];
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -447,6 +620,11 @@ async function startServer() {
     try {
       event = stripeClient.webhooks.constructEvent(req.body, sig!, webhookSecret);
     } catch (err: any) {
+      recordAbuseSignal({
+        scope: "webhook",
+        key: `ip:${req.ip || "unknown"}`,
+        reason: "signature_verification_failed",
+      });
       logWebhookDecision("warn", {
         decision: "signature_invalid",
         reason: err.message,
@@ -524,6 +702,12 @@ async function startServer() {
       if (!hasExpectedPriceId) validationErrors.push("price_id_mismatch");
 
       if (validationErrors.length > 0) {
+        recordAbuseSignal({
+          scope: "webhook",
+          key: `user:${userId || "unknown"}`,
+          reason: "checkout_session_validation_failed",
+          metadata: { reasons: validationErrors },
+        });
         await eventRef.set(
           {
             status: "rejected",
@@ -600,7 +784,8 @@ async function startServer() {
       });
       return res.status(500).json({ error: "Webhook processing failed." });
     }
-  });
+  }
+  );
 
   app.use(express.json({ limit: "32kb" }));
 
@@ -612,6 +797,11 @@ async function startServer() {
     async (req: AuthenticatedRequest, res: Response) => {
       const existingTitles = validateExistingTitles(req.body?.existingTitles);
       if (!existingTitles) {
+        recordAbuseSignal({
+          scope: "input_validation",
+          key: req.auth?.uid ? `user:${req.auth.uid}` : `ip:${req.ip || "unknown"}`,
+          reason: "invalid_existing_titles_payload",
+        });
         res.status(400).json({ error: "existingTitles must be a non-empty array of strings." });
         return;
       }
@@ -706,6 +896,11 @@ OUTPUT FORMAT: Return a JSON array of objects following the specified schema.`;
     async (req: AuthenticatedRequest, res: Response) => {
       const title = validateIdeaTitle(req.body?.ideaTitle);
       if (!title) {
+        recordAbuseSignal({
+          scope: "input_validation",
+          key: req.auth?.uid ? `user:${req.auth.uid}` : `ip:${req.ip || "unknown"}`,
+          reason: "invalid_idea_title_payload",
+        });
         res.status(400).json({ error: "ideaTitle must be a string between 3 and 120 characters." });
         return;
       }
@@ -745,6 +940,12 @@ OUTPUT FORMAT: Return a JSON array of objects following the specified schema.`;
     try {
       const payloadValidation = validateCheckoutPayload(req.body);
       if ("error" in payloadValidation) {
+        recordAbuseSignal({
+          scope: "input_validation",
+          key: req.auth?.uid ? `user:${req.auth.uid}` : `ip:${req.ip || "unknown"}`,
+          reason: "invalid_checkout_payload",
+          metadata: { error: payloadValidation.error },
+        });
         return res.status(400).json({ error: payloadValidation.error });
       }
 
@@ -800,10 +1001,22 @@ OUTPUT FORMAT: Return a JSON array of objects following the specified schema.`;
   app.post(
     "/api/billing/verify-entitlement",
     requireAuth,
-    checkoutUserLimiter,
-    checkoutIpLimiter,
+    verifyUserLimiter,
+    verifyIpLimiter,
+    verifyBodySizeLimiter,
     async (req: AuthenticatedRequest, res: Response) => {
       try {
+        const payloadValidation = validateVerifyEntitlementPayload(req.body);
+        if ("error" in payloadValidation) {
+          recordAbuseSignal({
+            scope: "input_validation",
+            key: req.auth?.uid ? `user:${req.auth.uid}` : `ip:${req.ip || "unknown"}`,
+            reason: "invalid_verify_entitlement_payload",
+            metadata: { error: payloadValidation.error },
+          });
+          return res.status(400).json({ error: payloadValidation.error });
+        }
+
         const userId = req.auth?.uid;
         if (!userId) {
           return res.status(401).json({ error: "Authenticated user is required." });

@@ -79,6 +79,15 @@ service cloud.firestore {
              (!('upsell' in data) || (data.upsell is string && data.upsell.size() <= 2000));
     }
 
+    function hasValidRoleEntitlement(data) {
+      let role = ('role' in data) ? data.role : 'user';
+      return role in ['user', 'pro', 'admin'] &&
+             (
+               (role == 'user' && data.isPaid == false) ||
+               ((role == 'pro' || role == 'admin') && data.isPaid == true)
+             );
+    }
+
     function isValidUserProfile(data) {
       let required = ['uid', 'email', 'isPaid'];
       let keys = data.keys();
@@ -86,7 +95,7 @@ service cloud.firestore {
              data.uid == request.auth.uid &&
              data.email == request.auth.token.email &&
              data.isPaid is bool &&
-             (!('role' in data) || (data.role in ['user', 'pro', 'admin'])) &&
+             hasValidRoleEntitlement(data) &&
              (!('favorites' in data) || (data.favorites is list && data.favorites.size() <= 500)) &&
              (!('checkedSteps' in data) || (data.checkedSteps is list && data.checkedSteps.size() <= 1000));
     }

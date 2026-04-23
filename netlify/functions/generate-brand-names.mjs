@@ -63,6 +63,57 @@ const parseStringArray = value => {
   return value.filter(item => typeof item === 'string' && item.trim().length > 0);
 };
 
+const rateLimitBuckets = new Map();
+const abuseBuckets = new Map();
+
+const getClientIp = event => {
+  const forwarded = getHeader(event, 'x-forwarded-for');
+  return typeof forwarded === 'string' ? forwarded.split(',')[0].trim() || 'unknown' : 'unknown';
+};
+
+const isAllowedByRateLimit = ({ key, windowMs, maxRequests }) => {
+  const now = Date.now();
+  const existing = rateLimitBuckets.get(key);
+  if (!existing || existing.resetAt <= now) {
+    rateLimitBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+  if (existing.count >= maxRequests) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((existing.resetAt - now) / 1000));
+    return { allowed: false, retryAfterSeconds };
+  }
+  existing.count += 1;
+  return { allowed: true, retryAfterSeconds: 0 };
+};
+
+const recordAbuseSignal = ({ scope, key, reason, metadata = {} }) => {
+  const now = Date.now();
+  const bucketKey = `${scope}:${key}:${reason}`;
+  const existing = abuseBuckets.get(bucketKey);
+  const next = existing
+    ? { count: existing.count + 1, firstSeen: existing.firstSeen, lastSeen: now }
+    : { count: 1, firstSeen: now, lastSeen: now };
+  abuseBuckets.set(bucketKey, next);
+
+  const shouldAlert = next.count === 5 || next.count === 10 || next.count % 25 === 0;
+  const payload = {
+    ts: new Date().toISOString(),
+    component: 'netlify_generate_brand_names',
+    level: shouldAlert ? 'alert' : 'info',
+    scope,
+    key,
+    reason,
+    count: next.count,
+    windowMs: now - next.firstSeen,
+    metadata,
+  };
+  if (shouldAlert) {
+    console.warn(JSON.stringify(payload));
+  } else {
+    console.log(JSON.stringify(payload));
+  }
+};
+
 let gemini = null;
 const getGemini = () => {
   if (!gemini) {
@@ -92,7 +143,64 @@ export const handler = async event => {
   }
 
   try {
-    await verifyAuthToken(event);
+    let decodedToken;
+    try {
+      decodedToken = await verifyAuthToken(event);
+    } catch (error) {
+      if (error?.message === 'UNAUTHORIZED') {
+        recordAbuseSignal({
+          scope: 'auth',
+          key: `ip:${getClientIp(event)}`,
+          reason: 'missing_or_invalid_auth',
+        });
+      }
+      throw error;
+    }
+
+    const userId = decodedToken?.uid || 'unknown';
+    const clientIp = getClientIp(event);
+
+    const userRateLimit = isAllowedByRateLimit({
+      key: `generation:user:${userId}`,
+      windowMs: 60_000,
+      maxRequests: 12,
+    });
+    if (!userRateLimit.allowed) {
+      recordAbuseSignal({
+        scope: 'rate_limit',
+        key: `user:${userId}`,
+        reason: 'brand_names_user_limit_exceeded',
+      });
+      return {
+        statusCode: 429,
+        headers: {
+          'content-type': 'application/json',
+          'retry-after': String(userRateLimit.retryAfterSeconds),
+        },
+        body: JSON.stringify({ error: 'Too many generation requests. Please try again shortly.' }),
+      };
+    }
+
+    const ipRateLimit = isAllowedByRateLimit({
+      key: `generation:ip:${clientIp}`,
+      windowMs: 60_000,
+      maxRequests: 20,
+    });
+    if (!ipRateLimit.allowed) {
+      recordAbuseSignal({
+        scope: 'rate_limit',
+        key: `ip:${clientIp}`,
+        reason: 'brand_names_ip_limit_exceeded',
+      });
+      return {
+        statusCode: 429,
+        headers: {
+          'content-type': 'application/json',
+          'retry-after': String(ipRateLimit.retryAfterSeconds),
+        },
+        body: JSON.stringify({ error: 'Too many generation requests. Please try again shortly.' }),
+      };
+    }
 
     let parsedBody = {};
     try {
@@ -107,6 +215,11 @@ export const handler = async event => {
 
     const ideaTitle = validateIdeaTitle(parsedBody?.ideaTitle);
     if (!ideaTitle) {
+      recordAbuseSignal({
+        scope: 'input_validation',
+        key: `user:${userId}`,
+        reason: 'invalid_idea_title_payload',
+      });
       return {
         statusCode: 400,
         headers: { 'content-type': 'application/json' },

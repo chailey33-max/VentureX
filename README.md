@@ -19,6 +19,12 @@ View your app in AI Studio: https://ai.studio/apps/6b2216cf-5795-4228-a3e7-bb0e0
 3. Run the app:
    `npm run dev`
 
+## Secrets and Environment Configuration
+
+- Never inject server secrets into client bundles (`VITE_*` values are client-exposed by design).
+- Keep production secrets in deployment environment variables only (Netlify/host settings), not in repo files.
+- Required server-side secrets (`GEMINI_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, service account credentials) must be configured in the runtime environment.
+
 ## Admin Authorization Model
 
 Admin access now uses Firebase custom claims as the primary authorization source.

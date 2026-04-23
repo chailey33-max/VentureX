@@ -174,33 +174,33 @@ Make payment/auth state authoritative, deterministic, and resilient.
 Add platform-level security controls and policy enforcement.
 
 ### HTTP Security Headers and Browser Hardening
-- [ ] Add CSP with strict source allowlists.
-- [ ] Add HSTS for HTTPS deployments.
-- [ ] Add frame protections with `X-Frame-Options` or CSP `frame-ancestors`.
-- [ ] Add COOP and related origin isolation headers.
-- [ ] Add `Referrer-Policy` and `X-Content-Type-Options`.
+- [x] Add CSP with strict source allowlists in [server.ts](server.ts) and [netlify.toml](netlify.toml).
+- [x] Add HSTS for HTTPS deployments in [server.ts](server.ts) and [netlify.toml](netlify.toml).
+- [x] Add frame protections with `X-Frame-Options` and CSP `frame-ancestors` in [server.ts](server.ts) and [netlify.toml](netlify.toml).
+- [x] Add COOP and related origin isolation headers in [server.ts](server.ts) and [netlify.toml](netlify.toml).
+- [x] Add `Referrer-Policy` and `X-Content-Type-Options` in [server.ts](server.ts) and [netlify.toml](netlify.toml).
 
 ### Abuse Prevention and Input Hardening
-- [ ] Add schema validation for all write endpoints.
-- [ ] Add endpoint-specific rate limits for generation, checkout, and sensitive routes.
-- [ ] Add telemetry and alerting for repeated abuse patterns.
+- [x] Add schema validation for all write endpoints in [server.ts](server.ts) and [netlify/functions/verify-entitlement.mjs](netlify/functions/verify-entitlement.mjs).
+- [x] Add endpoint-specific rate limits for generation, checkout, and sensitive routes in [server.ts](server.ts), [netlify/functions/generate-ideas.mjs](netlify/functions/generate-ideas.mjs), [netlify/functions/generate-brand-names.mjs](netlify/functions/generate-brand-names.mjs), and [netlify/functions/verify-entitlement.mjs](netlify/functions/verify-entitlement.mjs).
+- [x] Add telemetry and alerting for repeated abuse patterns in [server.ts](server.ts), [netlify/functions/generate-ideas.mjs](netlify/functions/generate-ideas.mjs), [netlify/functions/generate-brand-names.mjs](netlify/functions/generate-brand-names.mjs), and [netlify/functions/verify-entitlement.mjs](netlify/functions/verify-entitlement.mjs).
 
 ### Firestore Rules and Authorization Safety
-- [ ] Validate rules against current role and entitlement model in [firestore.rules](firestore.rules).
-- [ ] Verify no self-grant path for role or paid status.
-- [ ] Add rules linting/validation checks in CI.
+- [x] Validate rules against current role and entitlement model in [firestore.rules](firestore.rules).
+- [x] Verify no self-grant path for role or paid status.
+- [x] Add rules linting/validation checks in CI.
 
 ### Secrets and Configuration Hygiene
-- [ ] Verify no sensitive secrets are injected into client bundle.
-- [ ] Add secret scanning to CI.
-- [ ] Ensure production secrets are managed via environment configuration only.
+- [x] Verify no sensitive secrets are injected into client bundle. Evidence: [Sprint 3 secrets hygiene verification](security/audit/sprint-3-secrets-hygiene-2026-04-23.md).
+- [x] Add secret scanning to CI. Evidence: [Sprint 3 secrets hygiene verification](security/audit/sprint-3-secrets-hygiene-2026-04-23.md).
+- [x] Ensure production secrets are managed via environment configuration only. Evidence: [Sprint 3 secrets hygiene verification](security/audit/sprint-3-secrets-hygiene-2026-04-23.md).
 
 ### Sprint 3 Exit Criteria
-- [ ] Security headers are present and validated in staging/prod.
-- [ ] Abuse controls block expected misuse scenarios.
-- [ ] Firestore rule validations pass.
-- [ ] Secret scanning passes without critical findings.
-- [ ] No production behavior drift introduced by hardening controls.
+- [x] Security headers are present and validated in staging/prod. Evidence: [Sprint 3 exit verification](security/audit/sprint-3-exit-verification-2026-04-23.md).
+- [x] Abuse controls block expected misuse scenarios. Evidence: [Sprint 3 exit verification](security/audit/sprint-3-exit-verification-2026-04-23.md).
+- [x] Firestore rule validations pass. Evidence: [Sprint 3 exit verification](security/audit/sprint-3-exit-verification-2026-04-23.md).
+- [x] Secret scanning passes without critical findings. Evidence: [Sprint 3 exit verification](security/audit/sprint-3-exit-verification-2026-04-23.md).
+- [x] No production behavior drift introduced by hardening controls. Evidence: [Sprint 3 exit verification](security/audit/sprint-3-exit-verification-2026-04-23.md).
 
 ---
 
