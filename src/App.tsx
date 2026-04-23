@@ -711,8 +711,8 @@ export default function App() {
       if (doc.exists()) {
         const data = doc.data();
         setIsPaid(data.isPaid === true || data.role === 'pro');
-        if (data.favorites) setFavorites(data.favorites);
-        if (data.checkedSteps) setCheckedSteps(data.checkedSteps);
+        setFavorites(Array.isArray(data.favorites) ? data.favorites : []);
+        setCheckedSteps(Array.isArray(data.checkedSteps) ? data.checkedSteps : []);
       } else {
         // Create user doc if it doesn't exist
         setDoc(userDocRef, {
@@ -845,9 +845,9 @@ export default function App() {
             setIsPaid(isAdminUser);
           } else {
             const data = userDoc.data();
-            setIsPaid(data.isPaid || isAdminUser);
-            setFavorites(data.favorites || []);
-            setCheckedSteps(data.checkedSteps || []);
+            setIsPaid(data.isPaid === true || data.role === 'pro' || isAdminUser);
+            setFavorites(Array.isArray(data.favorites) ? data.favorites : []);
+            setCheckedSteps(Array.isArray(data.checkedSteps) ? data.checkedSteps : []);
           }
         } catch (error) {
           handleFirestoreError(error, OperationType.GET, `users/${currentUser.uid}`);
@@ -931,6 +931,7 @@ export default function App() {
           }
 
           if (Object.keys(updates).length > 0) {
+            updates.updatedAt = serverTimestamp();
             await updateDoc(userDocRef, updates);
             console.log('Migrated local data to Firestore');
           }
@@ -969,17 +970,22 @@ export default function App() {
         const savedPaid = await get('venturex_paid') || await get('boring_ventures_paid');
         const legacySaved = localStorage.getItem('venturex_ideas') || localStorage.getItem('boring_ventures_ideas');
         
-        if (savedFavs) {
-          setFavorites(JSON.parse(savedFavs));
-        }
+        // For signed-in users, Firestore profile is authoritative.
+        // Avoid stale local cache overwriting server state after auth hydration.
+        const shouldHydrateFromLocalProfile = !auth.currentUser;
+        if (shouldHydrateFromLocalProfile) {
+          if (savedFavs) {
+            setFavorites(JSON.parse(savedFavs));
+          }
 
-        if (savedSteps) {
-          setCheckedSteps(JSON.parse(savedSteps));
-        }
+          if (savedSteps) {
+            setCheckedSteps(JSON.parse(savedSteps));
+          }
 
-        if (savedPaid) {
-          const paidStatus = JSON.parse(savedPaid);
-          setIsPaid(prev => prev || paidStatus);
+          if (savedPaid) {
+            const paidStatus = JSON.parse(savedPaid);
+            setIsPaid(prev => prev || paidStatus);
+          }
         }
 
         let ideasToUse = CLEAN_BUSINESS_IDEAS;
@@ -1267,7 +1273,8 @@ export default function App() {
       const userDocRef = doc(db, 'users', user.uid);
       try {
         await updateDoc(userDocRef, {
-          checkedSteps: isChecked ? arrayRemove(stepKey) : arrayUnion(stepKey)
+          checkedSteps: isChecked ? arrayRemove(stepKey) : arrayUnion(stepKey),
+          updatedAt: serverTimestamp()
         });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
@@ -1368,7 +1375,8 @@ export default function App() {
       const userDocRef = doc(db, 'users', user.uid);
       try {
         await updateDoc(userDocRef, {
-          favorites: isFav ? arrayRemove(id) : arrayUnion(id)
+          favorites: isFav ? arrayRemove(id) : arrayUnion(id),
+          updatedAt: serverTimestamp()
         });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
