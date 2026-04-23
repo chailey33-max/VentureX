@@ -22,17 +22,26 @@ async function getAuthHeader(): Promise<Record<string, string>> {
   };
 }
 
-async function postToAiEndpoint<T>(endpoint: string, payload: Record<string, unknown>): Promise<T> {
+async function postToAiEndpoint<T>(
+  endpoint: string,
+  netlifyFunctionEndpoint: string,
+  payload: Record<string, unknown>
+): Promise<T> {
   const headers = await getAuthHeader();
-  const response = await fetch(endpoint, {
+  const requestInit: RequestInit = {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
-  });
+  };
 
-  const rawBody = await response.text();
-  if (rawBody.trim().startsWith("<!DOCTYPE") || rawBody.trim().startsWith("<html")) {
-    throw new Error("AI endpoint is unavailable in this deployment.");
+  let response = await fetch(endpoint, requestInit);
+  let rawBody = await response.text();
+
+  // Netlify static deployments may not route /api/* unless explicit redirects/functions exist.
+  // Fallback directly to function path if we detect HTML/404 from platform.
+  if (rawBody.trim().startsWith("<!DOCTYPE") || rawBody.trim().startsWith("<html") || response.status === 404) {
+    response = await fetch(netlifyFunctionEndpoint, requestInit);
+    rawBody = await response.text();
   }
 
   let parsed: any = null;
@@ -53,9 +62,11 @@ async function postToAiEndpoint<T>(endpoint: string, payload: Record<string, unk
 
 export async function generateNewIdeas(existingTitles: string[]): Promise<BusinessIdea[]> {
   try {
-    const data = await postToAiEndpoint<IdeasResponse>("/api/ai/generate-ideas", {
-      existingTitles,
-    });
+    const data = await postToAiEndpoint<IdeasResponse>(
+      "/api/ai/generate-ideas",
+      "/.netlify/functions/generate-ideas",
+      { existingTitles }
+    );
 
     return Array.isArray(data?.ideas) ? data.ideas : [];
   } catch (error) {
@@ -66,9 +77,11 @@ export async function generateNewIdeas(existingTitles: string[]): Promise<Busine
 
 export async function generateBrandNames(ideaTitle: string): Promise<string[]> {
   try {
-    const data = await postToAiEndpoint<BrandNamesResponse>("/api/ai/generate-brand-names", {
-      ideaTitle,
-    });
+    const data = await postToAiEndpoint<BrandNamesResponse>(
+      "/api/ai/generate-brand-names",
+      "/.netlify/functions/generate-brand-names",
+      { ideaTitle }
+    );
 
     return Array.isArray(data?.names) ? data.names : [];
   } catch (error) {

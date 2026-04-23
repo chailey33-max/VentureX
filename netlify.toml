@@ -3,6 +3,24 @@
   publish = "dist"
 
 [[redirects]]
+  from = "/api/ai/generate-ideas"
+  to = "/.netlify/functions/generate-ideas"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/ai/generate-brand-names"
+  to = "/.netlify/functions/generate-brand-names"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/create-checkout-session"
+  to = "/.netlify/functions/create-checkout-session"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
