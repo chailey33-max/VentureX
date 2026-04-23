@@ -210,28 +210,28 @@ Add platform-level security controls and policy enforcement.
 Reduce startup weight, main-thread work, and interaction latency.
 
 ### PERF-001: Bundle and Startup Cost
-- [ ] Add route/feature code splitting for heavy sections.
-- [ ] Lazy-load admin and premium-only surfaces.
-- [ ] Configure chunking strategy for large modules.
-- [ ] Add bundle size budget checks in CI.
-- [ ] Defer non-critical startup work to idle or delayed phases.
+- [x] Add route/feature code splitting for heavy sections. Evidence: [Sprint 4 PERF-001 verification](security/audit/sprint-4-perf-001-2026-04-23.md).
+- [x] Lazy-load admin and premium-only surfaces. Evidence: [Sprint 4 PERF-001 verification](security/audit/sprint-4-perf-001-2026-04-23.md).
+- [x] Configure chunking strategy for large modules. Evidence: [Sprint 4 PERF-001 verification](security/audit/sprint-4-perf-001-2026-04-23.md).
+- [x] Add bundle size budget checks in CI. Evidence: [Sprint 4 PERF-001 verification](security/audit/sprint-4-perf-001-2026-04-23.md).
+- [x] Defer non-critical startup work to idle or delayed phases. Evidence: [Sprint 4 PERF-001 verification](security/audit/sprint-4-perf-001-2026-04-23.md).
 
 ### PERF-002: Search and Render Hot Path
-- [ ] Pre-index normalized search text for ideas.
-- [ ] Debounce search query updates.
-- [ ] Add list virtualization/windowing for large result sets.
-- [ ] Reduce per-item animation overhead during filtering.
+- [x] Pre-index normalized search text for ideas. Evidence: [Sprint 4 PERF-002 verification](security/audit/sprint-4-perf-002-2026-04-23.md).
+- [x] Debounce search query updates. Evidence: [Sprint 4 PERF-002 verification](security/audit/sprint-4-perf-002-2026-04-23.md).
+- [x] Add list virtualization/windowing for large result sets. Evidence: [Sprint 4 PERF-002 verification](security/audit/sprint-4-perf-002-2026-04-23.md).
+- [x] Reduce per-item animation overhead during filtering. Evidence: [Sprint 4 PERF-002 verification](security/audit/sprint-4-perf-002-2026-04-23.md).
 
 ### PERF-003: Visual Effects and GPU Overhead
-- [ ] Reduce expensive blur/compositing layers on low-power profiles.
-- [ ] Add responsive/perf-profiled visual fallbacks.
-- [ ] Keep desktop visual quality while honoring performance budgets.
+- [x] Reduce expensive blur/compositing layers on low-power profiles. Evidence: [Sprint 4 PERF-003 verification](security/audit/sprint-4-perf-003-2026-04-23.md).
+- [x] Add responsive/perf-profiled visual fallbacks. Evidence: [Sprint 4 PERF-003 verification](security/audit/sprint-4-perf-003-2026-04-23.md).
+- [x] Keep desktop visual quality while honoring performance budgets. Evidence: [Sprint 4 PERF-003 verification](security/audit/sprint-4-perf-003-2026-04-23.md).
 
 ### Sprint 4 Exit Criteria
-- [ ] Main bundle is materially reduced from baseline.
-- [ ] Main-thread blocking and long tasks are reduced.
-- [ ] Search/filter interactions are responsive at scale.
-- [ ] Performance work does not change business behavior or user outcomes.
+- [x] Main bundle is materially reduced from baseline. Evidence: [Sprint 4 exit verification](security/audit/sprint-4-exit-verification-2026-04-23.md).
+- [x] Main-thread blocking and long tasks are reduced. Evidence: [Sprint 4 exit verification](security/audit/sprint-4-exit-verification-2026-04-23.md).
+- [x] Search/filter interactions are responsive at scale. Evidence: [Sprint 4 exit verification](security/audit/sprint-4-exit-verification-2026-04-23.md).
+- [x] Performance work does not change business behavior or user outcomes. Evidence: [Sprint 4 exit verification](security/audit/sprint-4-exit-verification-2026-04-23.md).
 
 ---
 
@@ -366,8 +366,8 @@ Verify all 10/10 gates with evidence and complete final release readiness checks
 
 ### Performance Findings Coverage
 - [ ] PERF-001 mapped to Sprint 4.
-- [ ] PERF-002 mapped to Sprint 4.
-- [ ] PERF-003 mapped to Sprint 4.
+- [x] PERF-002 mapped to Sprint 4.
+- [x] PERF-003 mapped to Sprint 4.
 
 ### Bug Findings Coverage
 - [ ] BUG-001 mapped to Sprint 2.

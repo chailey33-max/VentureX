@@ -32,7 +32,6 @@ import {
   EyeOff
 } from 'lucide-react';
 import { get, set, del } from 'idb-keyval';
-import { loadStripe } from '@stripe/stripe-js';
 
 import { BUSINESS_IDEAS } from './data/ideas';
 
@@ -54,7 +53,6 @@ import {
   doc, 
   setDoc, 
   getDoc, 
-  getDocs,
   onSnapshot, 
   collection, 
   query, 
@@ -62,14 +60,12 @@ import {
   updateDoc,
   arrayUnion,
   arrayRemove,
-  writeBatch,
   serverTimestamp
 } from 'firebase/firestore';
 
 const CLEAN_BUSINESS_IDEAS = BUSINESS_IDEAS.filter(idea => idea !== undefined && idea !== null);
 
 import { BusinessIdea } from './types';
-import { generateBrandNames, generateNewIdeas } from './services/geminiService';
 
 // Firestore Error Handling
 enum OperationType {
@@ -98,6 +94,7 @@ interface FirestoreErrorInfo {
 
 type EntitlementState = 'paymentPending' | 'paymentVerified' | 'paymentFailed' | null;
 type SessionPhase = 'auth-loading' | 'profile-loading' | 'ready' | 'error';
+type VisualPerfProfile = 'high-fidelity' | 'balanced' | 'low-power';
 
 
 const CATEGORIES = ['All', 'Shortlisted', 'Service', 'Maintenance', 'Automotive', 'Landscaping', 'Specialty', 'Seasonal', 'Cleaning', 'Real Estate', 'Passive Income', 'Creative', 'Event Service', 'Education', 'Beauty'];
@@ -108,6 +105,8 @@ const QUICK_TAGS = [
   { label: 'Passive', query: 'subscription recurring' },
   { label: 'Quick Launch', query: 'simple easy fast' }
 ];
+
+const IDEAS_WINDOW_SIZE = 48;
 
 const LEGACY_ADMIN_EMAILS = new Set([
   'chailey33@gmail.com',
@@ -506,6 +505,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAdminByClaims, setIsAdminByClaims] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [selectedIdea, setSelectedIdea] = useState<BusinessIdea | null>(null);
@@ -638,6 +638,39 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [adminFeedback]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 180);
+    return () => window.clearTimeout(timeoutId);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const evaluateVisualProfile = () => {
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const smallScreen = window.matchMedia('(max-width: 768px)').matches;
+      const cpuCores = navigator.hardwareConcurrency || 8;
+      const memoryEstimate = (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 8;
+
+      if (reducedMotion || smallScreen || cpuCores <= 4 || memoryEstimate <= 4) {
+        setVisualPerfProfile('low-power');
+        return;
+      }
+      if (cpuCores <= 6 || memoryEstimate <= 6) {
+        setVisualPerfProfile('balanced');
+        return;
+      }
+      setVisualPerfProfile('high-fidelity');
+    };
+
+    evaluateVisualProfile();
+    window.addEventListener('resize', evaluateVisualProfile);
+    return () => window.removeEventListener('resize', evaluateVisualProfile);
+  }, []);
+
   const [allIdeas, setAllIdeas] = useState<BusinessIdea[]>(CLEAN_BUSINESS_IDEAS);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -664,6 +697,8 @@ export default function App() {
   const [showTerms, setShowTerms] = useState(false);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [modifiedIds, setModifiedIds] = useState<Set<string>>(new Set());
+  const [visibleIdeaCount, setVisibleIdeaCount] = useState(IDEAS_WINDOW_SIZE);
+  const [visualPerfProfile, setVisualPerfProfile] = useState<VisualPerfProfile>('high-fidelity');
   const modifiedIdsPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localProfileCacheRef = useRef<{ favorites: string[]; checkedSteps: string[]; paidHint: boolean }>({
     favorites: [],
@@ -674,17 +709,31 @@ export default function App() {
 
   // Load modifiedIds from IndexedDB
   useEffect(() => {
-    const loadModified = async () => {
+    let isCancelled = false;
+    const runWhenIdle = (cb: () => void) => {
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        const idleId = (window as any).requestIdleCallback(cb, { timeout: 1200 });
+        return () => (window as any).cancelIdleCallback?.(idleId);
+      }
+      const timeoutId = globalThis.setTimeout(cb, 300);
+      return () => globalThis.clearTimeout(timeoutId);
+    };
+
+    const cleanupIdle = runWhenIdle(async () => {
       const saved = await get('venturex_modified') || await get('boring_ventures_modified');
-      if (saved) {
+      if (saved && !isCancelled) {
         try {
           setModifiedIds(new Set(JSON.parse(saved)));
         } catch (e) {
           console.error('Failed to load modified IDs', e);
         }
       }
+    });
+
+    return () => {
+      isCancelled = true;
+      cleanupIdle();
     };
-    loadModified();
   }, []);
 
   // Save modifiedIds to IndexedDB
@@ -1259,6 +1308,7 @@ export default function App() {
     }
     setIsGenerating(true);
     try {
+      const { writeBatch } = await import('firebase/firestore');
       const batch = writeBatch(db);
       allIdeas.forEach(idea => {
         const ideaDocRef = doc(db, 'ideas', idea.id);
@@ -1283,6 +1333,7 @@ export default function App() {
     setShowRevertConfirm(false);
     setIsGenerating(true);
     try {
+      const { getDocs } = await import('firebase/firestore');
       const ideasQuery = collection(db, 'ideas');
       const querySnapshot = await getDocs(ideasQuery);
       
@@ -1605,6 +1656,7 @@ export default function App() {
 
     setIsNaming(true);
     try {
+      const { generateBrandNames } = await import('./services/geminiService');
       const names = await generateBrandNames(idea.title);
       if (names.length > 0) {
         setGeneratedNames(prev => ({ ...prev, [idea.id]: names }));
@@ -1656,6 +1708,21 @@ export default function App() {
     return new Set(titles).size !== titles.length;
   }, [allIdeas]);
 
+  const ideaSearchIndex = useMemo(() => {
+    const entries = allIdeas.map((idea) => {
+      const normalized = [
+        idea.title,
+        idea.description,
+        idea.category,
+        idea.customerAcquisition.join(' ')
+      ]
+        .join(' ')
+        .toLowerCase();
+      return [idea.id, normalized] as const;
+    });
+    return new Map(entries);
+  }, [allIdeas]);
+
   const filteredIdeas = useMemo(() => {
     let baseIdeas = allIdeas;
     
@@ -1665,23 +1732,13 @@ export default function App() {
       baseIdeas = baseIdeas.filter(idea => idea.category === selectedCategory);
     }
 
-    const effectiveQuery = (searchQuery + ' ' + (activeTag || '')).trim().toLowerCase();
+    const effectiveQuery = (debouncedSearchQuery + ' ' + (activeTag || '')).trim().toLowerCase();
     let results = baseIdeas;
     if (effectiveQuery) {
       const keywords = effectiveQuery.split(/\s+/).filter(k => k.length > 0);
       results = baseIdeas.filter(idea => {
-        // Pre-calculate searchable text if needed, or at least avoid repeated joins
-        const title = idea.title.toLowerCase();
-        const desc = idea.description.toLowerCase();
-        const cat = idea.category.toLowerCase();
-        const acq = idea.customerAcquisition.join(' ').toLowerCase();
-
-        return keywords.every(keyword => 
-          title.includes(keyword) || 
-          desc.includes(keyword) || 
-          cat.includes(keyword) || 
-          acq.includes(keyword)
-        );
+        const normalized = ideaSearchIndex.get(idea.id) || '';
+        return keywords.every(keyword => normalized.includes(keyword));
       });
     }
 
@@ -1690,7 +1747,25 @@ export default function App() {
       return results.slice(0, 10);
     }
     return results;
-  }, [searchQuery, selectedCategory, activeTag, allIdeas, hasAccess, favorites]);
+  }, [debouncedSearchQuery, selectedCategory, activeTag, allIdeas, hasAccess, favorites, ideaSearchIndex]);
+
+  useEffect(() => {
+    setVisibleIdeaCount(IDEAS_WINDOW_SIZE);
+  }, [debouncedSearchQuery, selectedCategory, activeTag]);
+
+  const displayedIdeas = useMemo(() => {
+    return hasAccess ? filteredIdeas.slice(0, visibleIdeaCount) : filteredIdeas;
+  }, [filteredIdeas, hasAccess, visibleIdeaCount]);
+
+  const hasMoreIdeas = hasAccess && displayedIdeas.length < filteredIdeas.length;
+  const reduceCardAnimations =
+    debouncedSearchQuery.trim().length > 0 ||
+    selectedCategory !== 'All' ||
+    activeTag !== null ||
+    displayedIdeas.length > 36;
+  const useLowPowerVisuals = visualPerfProfile === 'low-power';
+  const useBalancedVisuals = visualPerfProfile === 'balanced';
+  const useLiteGlass = useLowPowerVisuals || useBalancedVisuals;
 
   const handleGenerateMore = async () => {
     if (!user) {
@@ -1703,6 +1778,7 @@ export default function App() {
     setIsGenerating(true);
     try {
       const existingTitles = allIdeas.map(i => i.title);
+      const { generateNewIdeas } = await import('./services/geminiService');
       const newIdeas = await generateNewIdeas(existingTitles);
       if (newIdeas && newIdeas.length > 0) {
         setAllIdeas(prev => [...prev, ...newIdeas]);
@@ -1732,7 +1808,9 @@ export default function App() {
             initial={{ opacity: 0, y: 50, x: '-50%' }}
             animate={{ opacity: 1, y: 0, x: '-50%' }}
             exit={{ opacity: 0, y: 20, x: '-50%' }}
-            className={`fixed bottom-10 left-1/2 z-[400] px-8 py-4 rounded-2xl backdrop-blur-xl border flex items-center gap-4 shadow-2xl ${
+            className={`fixed bottom-10 left-1/2 z-[400] px-8 py-4 rounded-2xl border flex items-center gap-4 ${
+              useLowPowerVisuals ? '' : 'shadow-2xl'
+            } ${useLiteGlass ? 'bg-luxury-black/90' : 'backdrop-blur-xl'} ${
               adminFeedback.type === 'success' ? 'bg-green-500/10 border-green-500/20 text-green-400' :
               adminFeedback.type === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
               'bg-gold/10 border-gold/20 text-gold'
@@ -1753,7 +1831,9 @@ export default function App() {
         <motion.div 
           initial={{ opacity: 0, y: -50, x: '-50%' }}
           animate={{ opacity: 1, y: 0, x: '-50%' }}
-          className="fixed top-24 left-1/2 z-[100] px-6 py-3 rounded-xl border border-yellow-500/20 bg-yellow-500/10 text-yellow-400 shadow-2xl flex items-center gap-4 backdrop-blur-xl max-w-[90vw] text-center"
+          className={`fixed top-24 left-1/2 z-[100] px-6 py-3 rounded-xl border border-yellow-500/20 bg-yellow-500/10 text-yellow-400 flex items-center gap-4 max-w-[90vw] text-center ${
+            useLiteGlass ? '' : 'backdrop-blur-xl'
+          } ${useLowPowerVisuals ? '' : 'shadow-2xl'}`}
         >
           <div className="flex flex-col sm:flex-row items-center gap-3">
             <div className="flex items-center gap-2">
@@ -1786,13 +1866,21 @@ export default function App() {
 
       {/* Luxury Background Elements */}
       <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-gold/5 rounded-full blur-[120px]" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gold/5 rounded-full blur-[120px]" />
-        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-[0.03] mix-blend-overlay" />
+        <div className={`absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-gold/5 rounded-full ${
+          useLowPowerVisuals ? 'blur-[36px]' : useBalancedVisuals ? 'blur-[72px]' : 'blur-[120px]'
+        }`} />
+        <div className={`absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gold/5 rounded-full ${
+          useLowPowerVisuals ? 'blur-[36px]' : useBalancedVisuals ? 'blur-[72px]' : 'blur-[120px]'
+        }`} />
+        {!useLowPowerVisuals && (
+          <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-[0.03] mix-blend-overlay" />
+        )}
       </div>
 
       {/* Global Navigation */}
-      <nav className="fixed top-0 left-0 right-0 z-[100] bg-luxury-black/80 backdrop-blur-xl border-b border-white/5">
+      <nav className={`fixed top-0 left-0 right-0 z-[100] border-b border-white/5 ${
+        useLiteGlass ? 'bg-luxury-black/95' : 'bg-luxury-black/80 backdrop-blur-xl'
+      }`}>
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3 group cursor-pointer" onClick={() => { setSelectedIdea(null); setIsCreatingOpportunity(false); setSelectedCategory('All'); }}>
             <div className="w-10 h-10 bg-gold rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(212,175,55,0.3)] group-hover:scale-110 transition-transform duration-500">
@@ -1823,7 +1911,9 @@ export default function App() {
                           initial={{ opacity: 0, scale: 0.95, y: 10 }}
                           animate={{ opacity: 1, scale: 1, y: 0 }}
                           exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                          className="absolute right-0 mt-4 w-72 bg-luxury-black/95 backdrop-blur-2xl border border-white/10 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] p-3 z-[110]"
+                          className={`absolute right-0 mt-4 w-72 bg-luxury-black/95 border border-white/10 rounded-3xl p-3 z-[110] ${
+                            useLiteGlass ? '' : 'backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)]'
+                          }`}
                         >
                           <div className="px-4 py-2 mb-2">
                             <p className="text-[10px] font-display font-bold uppercase tracking-[0.2em] text-gray-500">System Controls</p>
@@ -1939,8 +2029,16 @@ export default function App() {
         <header className="relative min-h-screen flex items-center justify-center overflow-hidden pt-28 pb-20 sm:pt-32 sm:pb-24 px-6">
           <div className="absolute inset-0 z-0">
             <div className="absolute inset-0 bg-linear-to-b from-gold/5 via-luxury-black/50 to-luxury-black" />
-            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-[0.05] mix-blend-overlay" />
-            <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-gold/10 rounded-full blur-[150px] animate-pulse" />
+            {!useLowPowerVisuals && (
+              <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-[0.05] mix-blend-overlay" />
+            )}
+            <div className={`absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-gold/10 rounded-full ${
+              useLowPowerVisuals
+                ? 'blur-[48px]'
+                : useBalancedVisuals
+                  ? 'blur-[96px]'
+                  : 'blur-[150px] animate-pulse'
+            }`} />
           </div>
 
           <div className="relative z-10 text-center max-w-5xl mx-auto">
@@ -2017,8 +2115,16 @@ export default function App() {
         >
           <div className="absolute inset-0 z-0">
             <div className="absolute inset-0 bg-linear-to-b from-gold/5 via-luxury-black/50 to-luxury-black" />
-            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-[0.05] mix-blend-overlay" />
-            <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-gold/10 rounded-full blur-[150px] animate-pulse" />
+            {!useLowPowerVisuals && (
+              <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-[0.05] mix-blend-overlay" />
+            )}
+            <div className={`absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-gold/10 rounded-full ${
+              useLowPowerVisuals
+                ? 'blur-[48px]'
+                : useBalancedVisuals
+                  ? 'blur-[96px]'
+                  : 'blur-[150px] animate-pulse'
+            }`} />
           </div>
 
           <div className="relative z-10 mx-auto w-full max-w-5xl text-center">
@@ -2041,8 +2147,12 @@ export default function App() {
               </p>
 
               <div className="max-w-2xl mx-auto mb-12 relative group">
-                <div className="absolute -inset-1 bg-gold/20 rounded-full blur-xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-500" />
-                <div className="relative flex items-center bg-white/5 border border-white/10 rounded-full p-2 backdrop-blur-xl focus-within:border-gold/50 transition-all">
+                {!useLowPowerVisuals && (
+                  <div className="absolute -inset-1 bg-gold/20 rounded-full blur-xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-500" />
+                )}
+                <div className={`relative flex items-center bg-white/5 border border-white/10 rounded-full p-2 focus-within:border-gold/50 transition-all ${
+                  useLiteGlass ? '' : 'backdrop-blur-xl'
+                }`}>
                   <Search className="w-6 h-6 text-gray-500 ml-6" />
                   <input 
                     type="text" 
@@ -2083,7 +2193,9 @@ export default function App() {
       )}
 
       {/* Search above category tabs (centered); tab strip scrolls horizontally without visible scrollbar */}
-      <section id="catalog" className="sticky top-0 z-40 overflow-x-hidden bg-luxury-black/80 backdrop-blur-xl border-b border-white/5 py-8">
+      <section id="catalog" className={`sticky top-0 z-40 overflow-x-hidden border-b border-white/5 py-8 ${
+        useLiteGlass ? 'bg-luxury-black/95' : 'bg-luxury-black/80 backdrop-blur-xl'
+      }`}>
         <div className="mx-auto flex min-w-0 max-w-7xl flex-col items-stretch gap-6 px-6 lg:gap-8">
           <form 
             onSubmit={(e) => e.preventDefault()}
@@ -2176,7 +2288,9 @@ export default function App() {
       {/* Revert Confirmation Modal */}
       <AnimatePresence>
         {showRevertConfirm && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+          <div className={`fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 ${
+            useLiteGlass ? '' : 'backdrop-blur-md'
+          }`}>
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -2210,7 +2324,9 @@ export default function App() {
       </AnimatePresence>
       <AnimatePresence>
         {showResetConfirm && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className={`fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 ${
+            useLiteGlass ? '' : 'backdrop-blur-sm'
+          }`}>
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -2243,7 +2359,9 @@ export default function App() {
       {/* Deduplicate Confirmation Modal */}
       <AnimatePresence>
         {showDeduplicateConfirm && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+          <div className={`fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 ${
+            useLiteGlass ? '' : 'backdrop-blur-md'
+          }`}>
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -2277,7 +2395,9 @@ export default function App() {
       </AnimatePresence>
       <AnimatePresence>
         {showDeleteConfirm && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+          <div className={`fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 ${
+            useLiteGlass ? '' : 'backdrop-blur-md'
+          }`}>
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -2358,13 +2478,17 @@ export default function App() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
             <AnimatePresence mode="popLayout">
-              {filteredIdeas.map((idea, index) => (
+              {displayedIdeas.map((idea, index) => (
                 <motion.div
                   key={idea.id}
-                  initial={{ opacity: 0, y: 30 }}
+                  initial={reduceCardAnimations ? false : { opacity: 0, y: 24 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  transition={{ duration: 0.6, delay: index * 0.05, ease: [0.23, 1, 0.32, 1] }}
+                  exit={reduceCardAnimations ? undefined : { opacity: 0, scale: 0.98 }}
+                  transition={
+                    reduceCardAnimations
+                      ? { duration: 0.16, ease: 'linear' }
+                      : { duration: 0.6, delay: index * 0.04, ease: [0.23, 1, 0.32, 1] }
+                  }
                   onClick={(e) => {
                     if ((e.target as HTMLElement).closest('button')) return;
                     setIsCreatingOpportunity(false);
@@ -2372,15 +2496,21 @@ export default function App() {
                   }}
                   className="group cursor-pointer"
                 >
-                  <div className="luxury-card overflow-hidden h-full flex flex-col">
+                  <div className={`luxury-card overflow-hidden h-full flex flex-col ${
+                    useLowPowerVisuals ? 'shadow-none' : ''
+                  }`}>
                     <div className="p-8 relative">
                       <div className="flex flex-col gap-2 mb-4">
                         <div className="flex gap-2">
-                          <span className="bg-luxury-black/60 backdrop-blur-xl text-gold text-[9px] font-display font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full border border-white/10">
+                          <span className={`bg-luxury-black/60 text-gold text-[9px] font-display font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full border border-white/10 ${
+                            useLiteGlass ? '' : 'backdrop-blur-xl'
+                          }`}>
                             {idea.category}
                           </span>
                           {favorites.includes(idea.id) && (
-                            <span className="bg-gold/20 backdrop-blur-xl text-gold text-[9px] font-display font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full border border-gold/40 flex items-center gap-1">
+                            <span className={`bg-gold/20 text-gold text-[9px] font-display font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full border border-gold/40 flex items-center gap-1 ${
+                              useLiteGlass ? '' : 'backdrop-blur-xl'
+                            }`}>
                               <Heart className="w-2.5 h-2.5 fill-current" />
                               Shortlisted
                             </span>
@@ -2397,7 +2527,9 @@ export default function App() {
                       <button 
                         type="button"
                         onClick={(e) => toggleFavorite(idea.id, e)}
-                        className={`absolute top-6 right-6 p-3 rounded-full backdrop-blur-xl border transition-all duration-500 ${
+                        className={`absolute top-6 right-6 p-3 rounded-full border transition-all duration-500 ${
+                          useLiteGlass ? '' : 'backdrop-blur-xl'
+                        } ${
                           favorites.includes(idea.id)
                             ? 'bg-gold border-gold text-luxury-black shadow-[0_0_20px_rgba(212,175,55,0.4)]'
                             : 'bg-luxury-black/40 border-white/10 text-white hover:bg-gold/20 hover:border-gold/50'
@@ -2483,6 +2615,17 @@ export default function App() {
           </div>
         )}
 
+        {hasMoreIdeas && (
+          <div className="mt-12 flex justify-center">
+            <button
+              onClick={() => setVisibleIdeaCount((prev) => prev + IDEAS_WINDOW_SIZE)}
+              className="px-8 py-3 bg-white/5 border border-white/10 rounded-full text-[10px] font-display font-bold uppercase tracking-[0.2em] text-gray-300 hover:bg-white/10 transition-all"
+            >
+              Load More Ideas
+            </button>
+          </div>
+        )}
+
         {/* Generate More Button */}
         <div className="mt-24 flex justify-center">
           <button
@@ -2534,7 +2677,7 @@ export default function App() {
                 setSelectedIdea(null);
                 setIsCreatingOpportunity(false);
               }}
-              className="absolute inset-0 bg-luxury-black/90 backdrop-blur-sm"
+              className={`absolute inset-0 bg-luxury-black/90 ${useLiteGlass ? '' : 'backdrop-blur-sm'}`}
             />
             
             <motion.div
@@ -2808,7 +2951,9 @@ export default function App() {
                                 </h4>
                                 <div className="bg-white/[0.02] border border-white/5 p-8 rounded-3xl relative overflow-hidden">
                                   {!hasAccess && (
-                                    <div className="absolute inset-0 bg-luxury-black/80 backdrop-blur-md z-10 flex flex-col items-center justify-center p-8 text-center">
+                                    <div className={`absolute inset-0 bg-luxury-black/80 z-10 flex flex-col items-center justify-center p-8 text-center ${
+                                      useLiteGlass ? '' : 'backdrop-blur-md'
+                                    }`}>
                                       <p className="text-xs text-gray-400 mb-4 font-light">Unlock proprietary AI naming engine</p>
                                       <button 
                                         onClick={() => setShowPaywall(true)}

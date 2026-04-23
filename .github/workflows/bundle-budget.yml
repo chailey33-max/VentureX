@@ -1,26 +1,24 @@
-name: Firestore Rules Validation
+name: Bundle Budget
 
 on:
   pull_request:
     paths:
-      - "firestore.rules"
-      - "eslint.config.js"
+      - "src/**"
+      - "vite.config.ts"
       - "package.json"
-      - "package-lock.json"
       - "pnpm-lock.yaml"
-      - ".github/workflows/firestore-rules.yml"
+      - ".github/workflows/bundle-budget.yml"
   push:
     branches: ["main"]
     paths:
-      - "firestore.rules"
-      - "eslint.config.js"
+      - "src/**"
+      - "vite.config.ts"
       - "package.json"
-      - "package-lock.json"
       - "pnpm-lock.yaml"
-      - ".github/workflows/firestore-rules.yml"
+      - ".github/workflows/bundle-budget.yml"
 
 jobs:
-  firestore-rules:
+  bundle-budget:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -40,5 +38,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint Firestore rules
-        run: pnpm run validate:firestore-rules
+      - name: Build with budget
+        env:
+          BUNDLE_BUDGET_JS_BYTES: "950000"
+        run: pnpm run build:with-budget

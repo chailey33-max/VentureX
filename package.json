@@ -6,11 +6,13 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
+    "build:with-budget": "vite build && node scripts/check-bundle-budget.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "lint:rules": "eslint firestore.rules --max-warnings=0",
-    "validate:firestore-rules": "npm run lint:rules"
+    "validate:firestore-rules": "npm run lint:rules",
+    "check:bundle-budget": "node scripts/check-bundle-budget.mjs"
   },
   "dependencies": {
     "@firebase/eslint-plugin-security-rules": "^0.0.1",
