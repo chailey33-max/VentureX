@@ -351,30 +351,30 @@ Institutionalize security/quality with automation and operational readiness.
 
 ### CI and Release Gates
 
-- [ ] Add CI workflow for lint, type-check, tests, build, and security scans.
-- [ ] Add dependency audit and secret scan jobs.
-- [ ] Enforce branch protections with required checks.
-- [ ] Enforce performance budget checks in CI.
+- [x] Add CI workflow for lint, type-check, tests, build, and security scans.
+- [x] Add dependency audit and secret scan jobs.
+- [x] Enforce branch protections with required checks.
+- [x] Enforce performance budget checks in CI.
 
 ### Monitoring and Alerting
 
-- [ ] Add structured logs for auth, checkout, webhook, and entitlement updates.
-- [ ] Add alerts for webhook signature failures and payment anomalies.
-- [ ] Add alerts for abuse spikes and rate-limit events.
+- [x] Add structured logs for auth, checkout, webhook, and entitlement updates.
+- [x] Add alerts for webhook signature failures and payment anomalies.
+- [x] Add alerts for abuse spikes and rate-limit events.
 
 ### Runbooks and Incident Readiness
 
-- [ ] Create key rotation runbook.
-- [ ] Create webhook outage and replay response runbook.
-- [ ] Create checkout incident runbook.
-- [ ] Create rollback and kill-switch runbook.
+- [x] Create key rotation runbook.
+- [x] Create webhook outage and replay response runbook.
+- [x] Create checkout incident runbook.
+- [x] Create rollback and kill-switch runbook.
 
 ### Sprint 7 Exit Criteria
 
-- [ ] CI gates enforce quality and security policy.
-- [ ] Alerting is tested with synthetic failure drills.
-- [ ] Runbooks are complete and approved.
-- [ ] Operational controls do not alter customer-facing functionality.
+- [x] CI gates enforce quality and security policy.
+- [x] Alerting is tested with synthetic failure drills.
+- [x] Runbooks are complete and approved.
+- [x] Operational controls do not alter customer-facing functionality.
 
 ---
 

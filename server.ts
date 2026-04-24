@@ -189,24 +189,23 @@ const EXPECTED_STRIPE_PRICE_IDS = new Set(
     .filter((item) => item.length > 0)
 );
 
-function logWebhookDecision(level: 'info' | 'warn' | 'error', payload: Record<string, unknown>) {
-  const entry = {
-    ts: new Date().toISOString(),
-    component: 'stripe_webhook',
-    ...payload,
-  };
-
+function logEvent(
+  level: 'info' | 'warn' | 'error',
+  component: string,
+  payload: Record<string, unknown>
+) {
+  const entry = { ts: new Date().toISOString(), component, level, ...payload };
   if (level === 'error') {
     console.error(JSON.stringify(entry));
-    return;
-  }
-
-  if (level === 'warn') {
+  } else if (level === 'warn') {
     console.warn(JSON.stringify(entry));
-    return;
+  } else {
+    console.log(JSON.stringify(entry));
   }
+}
 
-  console.log(JSON.stringify(entry));
+function logWebhookDecision(level: 'info' | 'warn' | 'error', payload: Record<string, unknown>) {
+  logEvent(level, 'stripe_webhook', payload);
 }
 
 type AbuseSignal = {
@@ -437,9 +436,19 @@ async function startServer() {
 
     try {
       req.auth = await admin.auth().verifyIdToken(token);
+      logEvent('info', 'auth', {
+        event: 'token_verified',
+        uid: req.auth.uid,
+        route: req.path,
+      });
       next();
     } catch (error) {
-      console.error('[Auth] Failed to verify Firebase ID token.', error);
+      logEvent('warn', 'auth', {
+        event: 'token_verification_failed',
+        ip: req.ip || 'unknown',
+        route: req.path,
+        reason: error instanceof Error ? error.message : 'unknown',
+      });
       recordAbuseSignal({
         scope: 'auth',
         key: `ip:${req.ip || 'unknown'}`,
@@ -887,7 +896,11 @@ OUTPUT FORMAT: Return a JSON array of objects following the specified schema.`;
           return res.status(400).json({ error: 'Request origin is not approved for checkout.' });
         }
 
-        console.log(`[Stripe] Creating checkout session for ${userEmail} (${userId})`);
+        logEvent('info', 'checkout', {
+          event: 'session_creating',
+          uid: userId,
+          email: userEmail,
+        });
 
         const stripeClient = getStripe();
 
@@ -917,9 +930,18 @@ OUTPUT FORMAT: Return a JSON array of objects following the specified schema.`;
           cancel_url: `${checkoutOrigin}/?payment=cancel`,
         });
 
+        logEvent('info', 'checkout', {
+          event: 'session_created',
+          uid: userId,
+          sessionId: session.id,
+        });
         res.json({ id: session.id, url: session.url });
       } catch (error: any) {
-        console.error('Stripe Error:', error);
+        logEvent('error', 'checkout', {
+          event: 'session_creation_failed',
+          uid: req.auth?.uid || 'unknown',
+          reason: error?.message || 'unknown',
+        });
         res.status(500).json({ error: error.message });
       }
     }
@@ -957,12 +979,23 @@ OUTPUT FORMAT: Return a JSON array of objects following the specified schema.`;
         const data = snapshot.exists ? snapshot.data() : null;
         const isPaid = data?.isPaid === true || data?.role === 'pro';
 
+        logEvent('info', 'entitlement', {
+          event: 'verify_result',
+          uid: userId,
+          isPaid,
+          status: isPaid ? 'paymentVerified' : 'paymentPending',
+        });
+
         return res.json({
           status: isPaid ? 'paymentVerified' : 'paymentPending',
           isPaid,
         });
       } catch (error: any) {
-        console.error('[Billing] Failed to verify entitlement.', error);
+        logEvent('error', 'entitlement', {
+          event: 'verify_failed',
+          uid: req.auth?.uid || 'unknown',
+          reason: error?.message || 'unknown',
+        });
         return res.status(500).json({ error: 'Failed to verify entitlement.' });
       }
     }
