@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://venturex.netlify.app/sitemap.xml

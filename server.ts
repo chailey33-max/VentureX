@@ -8,6 +8,14 @@ import admin from 'firebase-admin';
 import fs from 'fs';
 import cors from 'cors';
 import { GoogleGenAI, Type } from '@google/genai';
+import {
+  normalizeOrigin,
+  parseAllowedOrigins,
+  validateCheckoutPayload,
+  validateVerifyEntitlementPayload,
+  resolveOriginFromCandidates,
+  isFirestoreAlreadyExistsError,
+} from './src/lib/validation.js';
 
 dotenv.config();
 
@@ -30,12 +38,7 @@ type RateLimitOptions = {
   label: string;
 };
 
-type CheckoutPayload = {
-  userId?: string;
-  userEmail?: string;
-  origin?: string;
-};
-
+// CheckoutPayload imported from src/lib/validation.ts
 type VerifyEntitlementPayload = Record<string, never>;
 
 function createFixedWindowRateLimiter(options: RateLimitOptions) {
@@ -137,77 +140,7 @@ function validateIdeaTitle(value: unknown): string | null {
   return sanitized;
 }
 
-function normalizeOrigin(value: string): string | null {
-  try {
-    return new URL(value).origin;
-  } catch {
-    return null;
-  }
-}
-
-function parseAllowedOrigins(value: string | undefined): string[] {
-  if (!value) {
-    return [];
-  }
-
-  return value
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter((origin) => origin.length > 0)
-    .map((origin) => normalizeOrigin(origin))
-    .filter((origin): origin is string => Boolean(origin));
-}
-
-function validateCheckoutPayload(
-  value: unknown
-): { ok: true; payload: CheckoutPayload } | { ok: false; error: string } {
-  if (value === null || value === undefined) {
-    return { ok: true, payload: {} };
-  }
-
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    return { ok: false, error: 'Checkout payload must be a JSON object.' };
-  }
-
-  const payload = value as Record<string, unknown>;
-  const allowedKeys = new Set(['userId', 'userEmail', 'origin']);
-
-  for (const key of Object.keys(payload)) {
-    if (!allowedKeys.has(key)) {
-      return { ok: false, error: `Unexpected checkout payload field: ${key}.` };
-    }
-  }
-
-  if (
-    payload.userId !== undefined &&
-    (typeof payload.userId !== 'string' || payload.userId.length > 256)
-  ) {
-    return { ok: false, error: 'userId must be a string up to 256 characters.' };
-  }
-
-  if (
-    payload.userEmail !== undefined &&
-    (typeof payload.userEmail !== 'string' || payload.userEmail.length > 320)
-  ) {
-    return { ok: false, error: 'userEmail must be a string up to 320 characters.' };
-  }
-
-  if (
-    payload.origin !== undefined &&
-    (typeof payload.origin !== 'string' || payload.origin.length > 2048)
-  ) {
-    return { ok: false, error: 'origin must be a string up to 2048 characters.' };
-  }
-
-  return {
-    ok: true,
-    payload: {
-      userId: typeof payload.userId === 'string' ? payload.userId : undefined,
-      userEmail: typeof payload.userEmail === 'string' ? payload.userEmail : undefined,
-      origin: typeof payload.origin === 'string' ? payload.origin : undefined,
-    },
-  };
-}
+// normalizeOrigin, parseAllowedOrigins, validateCheckoutPayload imported from src/lib/validation.ts
 
 function createBodySizeLimiter(limitBytes: number, label: string) {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -242,23 +175,7 @@ function createBodySizeLimiter(limitBytes: number, label: string) {
   };
 }
 
-function validateVerifyEntitlementPayload(
-  value: unknown
-): { ok: true; payload: VerifyEntitlementPayload } | { ok: false; error: string } {
-  if (value === null || value === undefined) {
-    return { ok: true, payload: {} };
-  }
-
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    return { ok: false, error: 'Verify entitlement payload must be a JSON object.' };
-  }
-
-  if (Object.keys(value as Record<string, unknown>).length > 0) {
-    return { ok: false, error: 'Verify entitlement payload must be empty.' };
-  }
-
-  return { ok: true, payload: {} };
-}
+// validateVerifyEntitlementPayload imported from src/lib/validation.ts
 
 const ENTITLEMENT_PRODUCT_KEY = process.env.ENTITLEMENT_PRODUCT_KEY || 'full_access_lifetime';
 const EXPECTED_CHECKOUT_AMOUNT_CENTS = Number(process.env.EXPECTED_CHECKOUT_AMOUNT_CENTS || '4900');
@@ -395,6 +312,7 @@ async function startServer() {
       'https://securetoken.googleapis.com',
       'https://identitytoolkit.googleapis.com',
       'https://www.googleapis.com',
+      'https://accounts.google.com',
       'https://nominatim.openstreetmap.org',
     ])
   );
@@ -438,16 +356,16 @@ async function startServer() {
       "img-src 'self' data: https:",
       "font-src 'self' data:",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "script-src 'self' 'unsafe-inline' https://js.stripe.com",
+      "script-src 'self' 'unsafe-inline' https://js.stripe.com https://apis.google.com",
       `connect-src 'self' ${cspConnectOrigins.join(' ')}`,
-      "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com",
+      "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com https://accounts.google.com",
       "worker-src 'self' blob:",
       'upgrade-insecure-requests',
     ].join('; ');
 
     res.setHeader('Content-Security-Policy', csp);
     res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -586,27 +504,14 @@ async function startServer() {
   });
 
   const resolveApprovedCheckoutOrigin = (req: Request): string | null => {
-    const candidateHeaders: string[] = [];
-
-    if (typeof req.headers.origin === 'string') {
-      candidateHeaders.push(req.headers.origin);
-    }
-    if (typeof req.headers.referer === 'string') {
-      candidateHeaders.push(req.headers.referer);
-    }
-
-    for (const candidate of candidateHeaders) {
-      const normalizedOrigin = normalizeOrigin(candidate);
-      if (normalizedOrigin && approvedFrontendOriginSet.has(normalizedOrigin)) {
-        return normalizedOrigin;
-      }
-    }
-
-    if (checkoutDefaultOrigin && approvedFrontendOriginSet.has(checkoutDefaultOrigin)) {
-      return checkoutDefaultOrigin;
-    }
-
-    return null;
+    const candidates: string[] = [];
+    if (typeof req.headers.origin === 'string') candidates.push(req.headers.origin);
+    if (typeof req.headers.referer === 'string') candidates.push(req.headers.referer);
+    return resolveOriginFromCandidates(
+      candidates,
+      approvedFrontendOriginSet,
+      checkoutDefaultOrigin
+    );
   };
 
   // Stripe Webhook Endpoint (MUST be before express.json middleware)
@@ -657,8 +562,8 @@ async function startServer() {
             status: 'processing',
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
           });
-        } catch (err: any) {
-          if (err?.code === 6 || err?.code === 'already-exists') {
+        } catch (err: unknown) {
+          if (isFirestoreAlreadyExistsError(err)) {
             logWebhookDecision('info', {
               decision: 'duplicate_ignored',
               eventId: event.id,

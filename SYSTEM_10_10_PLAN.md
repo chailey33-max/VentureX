@@ -308,38 +308,38 @@ Establish confidence through automated testing and experience quality standards.
 
 ### Test Foundation
 
-- [ ] Add Vitest + React Testing Library setup.
-- [ ] Add unit tests for auth/session transitions.
-- [ ] Add unit tests for billing/entitlement state transitions.
-- [ ] Add integration tests for Firestore sync and conflict handling.
+- [x] Add Vitest + React Testing Library setup.
+- [x] Add unit tests for auth/session transitions.
+- [x] Add unit tests for billing/entitlement state transitions.
+- [x] Add integration tests for Firestore sync and conflict handling.
 
 ### Security Regression Tests
 
-- [ ] Add test for unauthorized checkout attempts.
-- [ ] Add test for origin tampering attempts.
-- [ ] Add test for webhook replay attempts.
-- [ ] Add test for entitlement self-grant attempts.
+- [x] Add test for unauthorized checkout attempts.
+- [x] Add test for origin tampering attempts.
+- [x] Add test for webhook replay attempts.
+- [x] Add test for entitlement self-grant attempts.
 
 ### E2E Smoke Coverage (Playwright)
 
-- [ ] Sign-in flow passes.
-- [ ] Browse/filter/shortlist flow passes.
-- [ ] Checkout-to-entitlement reflection flow passes.
-- [ ] Sign-out and session reset flow passes.
+- [x] Sign-in flow passes.
+- [x] Browse/filter/shortlist flow passes.
+- [x] Checkout-to-entitlement reflection flow passes.
+- [x] Sign-out and session reset flow passes.
 
 ### Accessibility and SEO
 
-- [ ] Fix missing accessible names for controls.
+- [x] Fix missing accessible names for controls.
 - [ ] Fix heading hierarchy and contrast issues.
-- [ ] Add valid `robots.txt` and sitemap.
+- [x] Add valid `robots.txt` and sitemap.
 - [ ] Re-run Lighthouse until accessibility and SEO targets are reached.
 
 ### Sprint 6 Exit Criteria
 
-- [ ] Critical paths are automated and stable.
+- [x] Critical paths are automated and stable.
 - [ ] Accessibility score is 95 or higher.
 - [ ] SEO score is 95 or higher.
-- [ ] Automated parity tests confirm unchanged behavior for existing features.
+- [x] Automated parity tests confirm unchanged behavior for existing features.
 
 ---
 

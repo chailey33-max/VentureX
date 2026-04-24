@@ -34,6 +34,7 @@ import { get, set, del } from 'idb-keyval';
 
 import { BUSINESS_IDEAS } from './data/ideas';
 import { CATEGORIES, IDEAS_WINDOW_SIZE, QUICK_TAGS } from './features/catalog/constants';
+import { mergeIdeasWithRemote } from './features/catalog/sync';
 import { hasAdminRoleClaim, isLegacyAdminEmail } from './features/admin/access';
 import { hasPaidEntitlement } from './features/billing/entitlement';
 import { AuthMode } from './features/auth/types';
@@ -264,10 +265,11 @@ const ComparisonModal = ({ ideas, onClose }: { ideas: BusinessIdea[]; onClose: (
             <h2 className="text-4xl font-serif text-white">Side-by-Side Comparison</h2>
           </div>
           <button
+            aria-label="Close comparison report"
             onClick={onClose}
             className="w-12 h-12 flex items-center justify-center hover:bg-white/10 rounded-full transition-all border border-white/10"
           >
-            <X className="w-6 h-6" />
+            <X className="w-6 h-6" aria-hidden="true" />
           </button>
         </div>
 
@@ -412,10 +414,11 @@ const AuthModal = ({
             </p>
           </div>
           <button
+            aria-label="Close"
             onClick={onClose}
             className="w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full transition-all"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
@@ -492,10 +495,15 @@ const AuthModal = ({
                   />
                   <button
                     type="button"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors"
                   >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {showPassword ? (
+                      <EyeOff className="w-4 h-4" aria-hidden="true" />
+                    ) : (
+                      <Eye className="w-4 h-4" aria-hidden="true" />
+                    )}
                   </button>
                 </div>
               </div>
@@ -1144,40 +1152,9 @@ export default function App() {
 
         const firestoreIdeas = snapshot.docs.map((doc) => doc.data() as BusinessIdea);
 
-        setAllIdeas((prev) => {
-          const newIdeas = [...prev];
-
-          firestoreIdeas.forEach((fIdea) => {
-            const index = newIdeas.findIndex((m) => m.id === fIdea.id);
-            if (index === -1) {
-              newIdeas.push(fIdea);
-            } else {
-              // If admin, only overwrite if we haven't modified this specific idea locally
-              // OR if the local one is a placeholder and remote is real
-              const localIdea = newIdeas[index];
-              if (!localIdea) return;
-              const isLocalPlaceholder =
-                !localIdea.image ||
-                localIdea.image.includes('picsum.photos') ||
-                localIdea.image.includes('1562016600-ece13e8ba570');
-              const isRemoteReal =
-                fIdea.image &&
-                !fIdea.image.includes('picsum.photos') &&
-                !fIdea.image.includes('1562016600-ece13e8ba570');
-
-              const shouldOverwrite =
-                !(isAdmin || isUnverifiedAdmin) ||
-                !modifiedIds.has(fIdea.id) ||
-                (isLocalPlaceholder && isRemoteReal);
-
-              if (shouldOverwrite) {
-                newIdeas[index] = fIdea;
-              }
-            }
-          });
-
-          return newIdeas;
-        });
+        setAllIdeas((prev) =>
+          mergeIdeasWithRemote(prev, firestoreIdeas, modifiedIds, isAdmin || isUnverifiedAdmin)
+        );
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, 'ideas', 'listener');
@@ -1945,10 +1922,11 @@ export default function App() {
             )}
             <span className="text-sm font-medium">{adminFeedback.message}</span>
             <button
+              aria-label="Dismiss notification"
               onClick={() => setAdminFeedback(null)}
               className="ml-4 opacity-50 hover:opacity-100 transition-opacity"
             >
-              <X className="w-4 h-4" />
+              <X className="w-4 h-4" aria-hidden="true" />
             </button>
           </motion.div>
         )}
@@ -2344,9 +2322,10 @@ export default function App() {
                     useLiteGlass ? '' : 'backdrop-blur-xl'
                   }`}
                 >
-                  <Search className="w-6 h-6 text-gray-500 ml-6" />
+                  <Search className="w-6 h-6 text-gray-500 ml-6" aria-hidden="true" />
                   <input
-                    type="text"
+                    type="search"
+                    aria-label="Search by industry, cost, or keyword"
                     placeholder="Search by industry, cost, or keyword..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -2354,10 +2333,12 @@ export default function App() {
                   />
                   {searchQuery && (
                     <button
+                      type="button"
+                      aria-label="Clear search"
                       onClick={() => setSearchQuery('')}
                       className="p-2 hover:bg-white/10 rounded-full transition-colors mr-2"
                     >
-                      <X className="w-5 h-5 text-gray-500" />
+                      <X className="w-5 h-5 text-gray-500" aria-hidden="true" />
                     </button>
                   )}
                 </div>
@@ -2395,9 +2376,13 @@ export default function App() {
             onSubmit={(e) => e.preventDefault()}
             className="group relative mx-auto w-full max-w-2xl shrink-0"
           >
-            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-500 w-4 h-4 pointer-events-none group-focus-within:text-gold transition-colors" />
+            <Search
+              className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-500 w-4 h-4 pointer-events-none group-focus-within:text-gold transition-colors"
+              aria-hidden="true"
+            />
             <input
-              type="text"
+              type="search"
+              aria-label="Search the collection"
               placeholder="Search the collection..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -2406,10 +2391,11 @@ export default function App() {
             {searchQuery && (
               <button
                 type="button"
+                aria-label="Clear search"
                 onClick={() => setSearchQuery('')}
                 className="absolute right-5 top-1/2 -translate-y-1/2 p-1 hover:bg-white/10 rounded-full text-gray-500 hover:text-white transition-all"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4 h-4" aria-hidden="true" />
               </button>
             )}
           </form>
@@ -2930,6 +2916,7 @@ export default function App() {
                   </button>
                 )}
                 <button
+                  aria-label="Close idea detail"
                   onClick={() => {
                     setSelectedIdea(null);
                     setIsCreatingOpportunity(false);
@@ -2938,7 +2925,7 @@ export default function App() {
                   }}
                   className="p-2 bg-luxury-black/50 rounded-full hover:bg-luxury-black transition-colors"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-5 h-5" aria-hidden="true" />
                 </button>
               </div>
 
@@ -3623,10 +3610,11 @@ export default function App() {
             >
               <div className="absolute top-0 left-0 w-full h-1 gold-gradient z-10 pointer-events-none" />
               <button
+                aria-label="Close upgrade modal"
                 onClick={() => setShowPaywall(false)}
                 className="absolute top-6 right-6 z-20 p-2 hover:bg-white/10 rounded-full transition-colors"
               >
-                <X className="w-6 h-6 text-gray-500" />
+                <X className="w-6 h-6 text-gray-500" aria-hidden="true" />
               </button>
 
               <div className="scrollbar-stable-paywall flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 sm:px-8 md:px-12 pt-6 sm:pt-8 md:pt-12 pb-6 sm:pb-8 md:pb-12">
