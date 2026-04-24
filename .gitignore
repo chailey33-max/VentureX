@@ -1,7 +1,11 @@
 node_modules/
+.pnpm-store/
 build/
 dist/
 coverage/
+*.tsbuildinfo
+.eslintcache
+.cache/
 .DS_Store
 *.log
 .env*

@@ -100,7 +100,7 @@ Eliminate immediate exploitation paths and close critical access-control gaps.
 - [x] Add request schema validation for generation endpoint.
 - [x] Add auth middleware for generation endpoint.
 - [x] Add rate limiting by user and IP for generation endpoint.
-- [ ] Rotate exposed Gemini key and revoke old key.
+- [x] Rotate exposed Gemini key and revoke old key.
 
 ### VULN-002: Unauthenticated Checkout and Origin Trust
 
@@ -115,7 +115,7 @@ Eliminate immediate exploitation paths and close critical access-control gaps.
 ### Serverless Checkout Parity or Decommission
 
 - [x] Apply same auth/origin/rate-limit controls to [netlify/functions/create-checkout-session.mjs](netlify/functions/create-checkout-session.mjs).
-- [ ] Or deprecate serverless checkout path and route all traffic to secured backend.
+- [x] Or deprecate serverless checkout path and route all traffic to secured backend.
 
 ### VULN-003: Hardcoded Admin Identity
 
@@ -135,11 +135,11 @@ Eliminate immediate exploitation paths and close critical access-control gaps.
 
 ### Sprint 1 Exit Criteria
 
-- [ ] No browser path exposes Gemini key.
-- [ ] Unauthenticated checkout attempts fail with 401.
-- [ ] Origin tampering cannot control payment return URLs.
-- [ ] Dependency audit has 0 critical and 0 high findings.
-- [ ] Golden flows remain functionally equivalent after security changes.
+- [x] No browser path exposes Gemini key.
+- [x] Unauthenticated checkout attempts fail with 401.
+- [x] Origin tampering cannot control payment return URLs.
+- [x] Dependency audit has 0 critical and 0 high findings.
+- [x] Golden flows remain functionally equivalent after security changes.
 
 ---
 
@@ -151,41 +151,41 @@ Make payment/auth state authoritative, deterministic, and resilient.
 
 ### VULN-004 and VULN-007: Entitlement Drift and Client-Side Paid Writes
 
-- [ ] Remove client-side post-checkout `isPaid` write from [src/App.tsx](src/App.tsx).
-- [ ] Add server-authoritative payment verification endpoint.
-- [ ] Implement UI entitlement states: paymentPending, paymentVerified, paymentFailed.
-- [ ] Treat local paid cache as UX hint only and never as authorization source.
+- [x] Remove client-side post-checkout `isPaid` write from [src/App.tsx](src/App.tsx).
+- [x] Add server-authoritative payment verification endpoint.
+- [x] Implement UI entitlement states: paymentPending, paymentVerified, paymentFailed.
+- [x] Treat local paid cache as UX hint only and never as authorization source.
 
 ### VULN-005: Dual Auth/Profile Subscription Paths
 
-- [ ] Replace dual mutation flows with one deterministic session bootstrap flow.
-- [ ] Introduce explicit state phases: auth-loading, profile-loading, ready, error.
-- [ ] Ensure single ownership path for `isPaid`, `favorites`, and `checkedSteps`.
-- [ ] Add cancellation guards for async effects to prevent stale updates.
+- [x] Replace dual mutation flows with one deterministic session bootstrap flow.
+- [x] Introduce explicit state phases: auth-loading, profile-loading, ready, error.
+- [x] Ensure single ownership path for `isPaid`, `favorites`, and `checkedSteps`.
+- [x] Add cancellation guards for async effects to prevent stale updates.
 
 ### VULN-006: Webhook Business-Rule Assertions and Replay Safety
 
-- [ ] Validate expected amount before granting entitlement.
-- [ ] Validate expected currency before granting entitlement.
-- [ ] Validate expected product/price identifier before granting entitlement.
-- [ ] Validate payment status and checkout mode before granting entitlement.
-- [ ] Add idempotency store for processed event IDs.
-- [ ] Add structured logging for all webhook decisions.
+- [x] Validate expected amount before granting entitlement.
+- [x] Validate expected currency before granting entitlement.
+- [x] Validate expected product/price identifier before granting entitlement.
+- [x] Validate payment status and checkout mode before granting entitlement.
+- [x] Add idempotency store for processed event IDs.
+- [x] Add structured logging for all webhook decisions.
 
 ### Bug Fixes (BUG-001 to BUG-004)
 
-- [ ] BUG-001: Add cleanup/abort protection for geolocation lifecycle.
-- [ ] BUG-002: Remove conflicting checkout success entitlement write path.
-- [ ] BUG-003: Debounce or batch IndexedDB modified-id writes.
-- [ ] BUG-004: Add robust restore-flow error recovery and fallback UX.
+- [x] BUG-001: Add cleanup/abort protection for geolocation lifecycle.
+- [x] BUG-002: Remove conflicting checkout success entitlement write path.
+- [x] BUG-003: Debounce or batch IndexedDB modified-id writes.
+- [x] BUG-004: Add robust restore-flow error recovery and fallback UX.
 
 ### Sprint 2 Exit Criteria
 
-- [ ] Entitlement is granted only by server-authoritative path.
-- [ ] Login/refresh/logout behavior is deterministic.
-- [ ] Webhook replay and invalid payment payloads cannot grant access.
-- [ ] BUG-001 through BUG-004 are closed with verification evidence.
-- [ ] No regressions in checkout UX and entitlement reflection flow.
+- [x] Entitlement is granted only by server-authoritative path.
+- [x] Login/refresh/logout behavior is deterministic.
+- [x] Webhook replay and invalid payment payloads cannot grant access.
+- [x] BUG-001 through BUG-004 are closed with verification evidence.
+- [x] No regressions in checkout UX and entitlement reflection flow.
 
 ---
 
@@ -197,37 +197,37 @@ Add platform-level security controls and policy enforcement.
 
 ### HTTP Security Headers and Browser Hardening
 
-- [ ] Add CSP with strict source allowlists.
-- [ ] Add HSTS for HTTPS deployments.
-- [ ] Add frame protections with `X-Frame-Options` or CSP `frame-ancestors`.
-- [ ] Add COOP and related origin isolation headers.
-- [ ] Add `Referrer-Policy` and `X-Content-Type-Options`.
+- [x] Add CSP with strict source allowlists.
+- [x] Add HSTS for HTTPS deployments.
+- [x] Add frame protections with `X-Frame-Options` or CSP `frame-ancestors`.
+- [x] Add COOP and related origin isolation headers.
+- [x] Add `Referrer-Policy` and `X-Content-Type-Options`.
 
 ### Abuse Prevention and Input Hardening
 
-- [ ] Add schema validation for all write endpoints.
-- [ ] Add endpoint-specific rate limits for generation, checkout, and sensitive routes.
-- [ ] Add telemetry and alerting for repeated abuse patterns.
+- [x] Add schema validation for all write endpoints.
+- [x] Add endpoint-specific rate limits for generation, checkout, and sensitive routes.
+- [x] Add telemetry and alerting for repeated abuse patterns.
 
 ### Firestore Rules and Authorization Safety
 
-- [ ] Validate rules against current role and entitlement model in [firestore.rules](firestore.rules).
-- [ ] Verify no self-grant path for role or paid status.
-- [ ] Add rules linting/validation checks in CI.
+- [x] Validate rules against current role and entitlement model in [firestore.rules](firestore.rules).
+- [x] Verify no self-grant path for role or paid status.
+- [x] Add rules linting/validation checks in CI.
 
 ### Secrets and Configuration Hygiene
 
-- [ ] Verify no sensitive secrets are injected into client bundle.
-- [ ] Add secret scanning to CI.
-- [ ] Ensure production secrets are managed via environment configuration only.
+- [x] Verify no sensitive secrets are injected into client bundle.
+- [x] Add secret scanning to CI.
+- [x] Ensure production secrets are managed via environment configuration only.
 
 ### Sprint 3 Exit Criteria
 
-- [ ] Security headers are present and validated in staging/prod.
-- [ ] Abuse controls block expected misuse scenarios.
-- [ ] Firestore rule validations pass.
-- [ ] Secret scanning passes without critical findings.
-- [ ] No production behavior drift introduced by hardening controls.
+- [x] Security headers are present and validated in staging/prod.
+- [x] Abuse controls block expected misuse scenarios.
+- [x] Firestore rule validations pass.
+- [x] Secret scanning passes without critical findings.
+- [x] No production behavior drift introduced by hardening controls.
 
 ---
 
@@ -239,31 +239,31 @@ Reduce startup weight, main-thread work, and interaction latency.
 
 ### PERF-001: Bundle and Startup Cost
 
-- [ ] Add route/feature code splitting for heavy sections.
-- [ ] Lazy-load admin and premium-only surfaces.
-- [ ] Configure chunking strategy for large modules.
-- [ ] Add bundle size budget checks in CI.
-- [ ] Defer non-critical startup work to idle or delayed phases.
+- [x] Add route/feature code splitting for heavy sections.
+- [x] Lazy-load admin and premium-only surfaces.
+- [x] Configure chunking strategy for large modules.
+- [x] Add bundle size budget checks in CI.
+- [x] Defer non-critical startup work to idle or delayed phases.
 
 ### PERF-002: Search and Render Hot Path
 
-- [ ] Pre-index normalized search text for ideas.
-- [ ] Debounce search query updates.
-- [ ] Add list virtualization/windowing for large result sets.
-- [ ] Reduce per-item animation overhead during filtering.
+- [x] Pre-index normalized search text for ideas.
+- [x] Debounce search query updates.
+- [x] Add list virtualization/windowing for large result sets.
+- [x] Reduce per-item animation overhead during filtering.
 
 ### PERF-003: Visual Effects and GPU Overhead
 
-- [ ] Reduce expensive blur/compositing layers on low-power profiles.
-- [ ] Add responsive/perf-profiled visual fallbacks.
-- [ ] Keep desktop visual quality while honoring performance budgets.
+- [x] Reduce expensive blur/compositing layers on low-power profiles.
+- [x] Add responsive/perf-profiled visual fallbacks.
+- [x] Keep desktop visual quality while honoring performance budgets.
 
 ### Sprint 4 Exit Criteria
 
-- [ ] Main bundle is materially reduced from baseline.
-- [ ] Main-thread blocking and long tasks are reduced.
-- [ ] Search/filter interactions are responsive at scale.
-- [ ] Performance work does not change business behavior or user outcomes.
+- [x] Main bundle is materially reduced from baseline.
+- [x] Main-thread blocking and long tasks are reduced.
+- [x] Search/filter interactions are responsive at scale.
+- [x] Performance work does not change business behavior or user outcomes.
 
 ---
 
@@ -275,28 +275,28 @@ Make the codebase safer to change and easier to scale.
 
 ### Linting and Formatting
 
-- [ ] Expand ESLint coverage to frontend and backend TS/TSX code.
-- [ ] Add Prettier config and scripts.
-- [ ] Add husky + lint-staged pre-commit checks.
+- [x] Expand ESLint coverage to frontend and backend TS/TSX code.
+- [x] Add Prettier config and scripts.
+- [x] Add husky + lint-staged pre-commit checks.
 
 ### Type Safety
 
-- [ ] Enable strict TypeScript mode progressively in [tsconfig.json](tsconfig.json).
-- [ ] Fix strict-mode errors and remove unsafe implicit types.
-- [ ] Enforce type-check gate in CI.
+- [x] Enable strict TypeScript mode progressively in [tsconfig.json](tsconfig.json).
+- [x] Fix strict-mode errors and remove unsafe implicit types.
+- [x] Enforce type-check gate in CI.
 
 ### Modularization of Monolith
 
-- [ ] Split [src/App.tsx](src/App.tsx) into feature modules: auth, catalog, billing, admin, modals.
-- [ ] Extract shared UI primitives and reusable hooks.
-- [ ] Add file-size and complexity guardrails.
+- [x] Split [src/App.tsx](src/App.tsx) into feature modules: auth, catalog, billing, admin, modals.
+- [x] Extract shared UI primitives and reusable hooks.
+- [x] Add file-size and complexity guardrails.
 
 ### Sprint 5 Exit Criteria
 
-- [ ] Lint and type checks pass cleanly in CI.
-- [ ] Main app file is reduced to orchestration role.
-- [ ] Feature modules are independently testable.
-- [ ] Refactor introduces no functional changes to golden flows.
+- [x] Lint and type checks pass cleanly in CI.
+- [x] Main app file is reduced to orchestration role.
+- [x] Feature modules are independently testable.
+- [x] Refactor introduces no functional changes to golden flows.
 
 ---
 
