@@ -1,15 +1,14 @@
 /// <reference types="vite/client" />
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence, useMotionValue, useSpring } from 'motion/react';
-import { 
-  Search, 
-  DollarSign, 
-  TrendingUp, 
-  Users, 
-  ArrowRight, 
+import {
+  Search,
+  DollarSign,
+  TrendingUp,
+  Users,
+  ArrowRight,
   X,
   Briefcase,
-  Loader2,
   Plus,
   Pencil,
   Image as ImageIcon,
@@ -29,41 +28,48 @@ import {
   Mail,
   Lock,
   Eye,
-  EyeOff
+  EyeOff,
 } from 'lucide-react';
 import { get, set, del } from 'idb-keyval';
 
 import { BUSINESS_IDEAS } from './data/ideas';
+import { CATEGORIES, IDEAS_WINDOW_SIZE, QUICK_TAGS } from './features/catalog/constants';
+import { hasAdminRoleClaim, isLegacyAdminEmail } from './features/admin/access';
+import { hasPaidEntitlement } from './features/billing/entitlement';
+import { AuthMode } from './features/auth/types';
+import { useDebouncedValue } from './hooks/useDebouncedValue';
+import { useVisualPerfProfile } from './hooks/useVisualPerfProfile';
+import { LoadingSpinner } from './components/ui/LoadingSpinner';
 
 // Firebase Imports
 import { auth, db } from './firebase';
-import { 
-  onAuthStateChanged, 
-  signInWithPopup, 
-  GoogleAuthProvider, 
+import {
+  onAuthStateChanged,
+  signInWithPopup,
+  GoogleAuthProvider,
   signOut,
   sendEmailVerification,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
   updateProfile,
-  User
+  User,
 } from 'firebase/auth';
-import { 
-  doc, 
-  setDoc, 
-  getDoc, 
-  onSnapshot, 
-  collection, 
-  query, 
+import {
+  doc,
+  setDoc,
+  getDoc,
+  onSnapshot,
+  collection,
+  query,
   where,
   updateDoc,
   arrayUnion,
   arrayRemove,
-  serverTimestamp
+  serverTimestamp,
 } from 'firebase/firestore';
 
-const CLEAN_BUSINESS_IDEAS = BUSINESS_IDEAS.filter(idea => idea !== undefined && idea !== null);
+const CLEAN_BUSINESS_IDEAS = BUSINESS_IDEAS.filter((idea) => idea !== undefined && idea !== null);
 
 import { BusinessIdea } from './types';
 
@@ -89,37 +95,11 @@ interface FirestoreErrorInfo {
     email: string | null | undefined;
     emailVerified: boolean | undefined;
     isAnonymous: boolean | undefined;
-  }
+  };
 }
 
 type EntitlementState = 'paymentPending' | 'paymentVerified' | 'paymentFailed' | null;
 type SessionPhase = 'auth-loading' | 'profile-loading' | 'ready' | 'error';
-type VisualPerfProfile = 'high-fidelity' | 'balanced' | 'low-power';
-
-
-const CATEGORIES = ['All', 'Shortlisted', 'Service', 'Maintenance', 'Automotive', 'Landscaping', 'Specialty', 'Seasonal', 'Cleaning', 'Real Estate', 'Passive Income', 'Creative', 'Event Service', 'Education', 'Beauty'];
-
-const QUICK_TAGS = [
-  { label: 'High Margin', query: 'luxury premium high-end' },
-  { label: 'Low Startup', query: 'under 1000' },
-  { label: 'Passive', query: 'subscription recurring' },
-  { label: 'Quick Launch', query: 'simple easy fast' }
-];
-
-const IDEAS_WINDOW_SIZE = 48;
-
-const LEGACY_ADMIN_EMAILS = new Set([
-  'chailey33@gmail.com',
-  'abdullah.asif2966@gmail.com',
-]);
-
-const isLegacyAdminEmail = (email: string | null | undefined) => {
-  return LEGACY_ADMIN_EMAILS.has((email ?? '').toLowerCase());
-};
-
-const hasAdminRoleClaim = (claims: Record<string, unknown>) => {
-  return claims.admin === true || claims.role === 'admin';
-};
 
 const CalculatorSection = ({ idea }: { idea: BusinessIdea }) => {
   const [price, setPrice] = useState(150);
@@ -134,28 +114,34 @@ const CalculatorSection = ({ idea }: { idea: BusinessIdea }) => {
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-4">
         <div className="space-y-2">
-          <label className="text-[10px] uppercase tracking-widest text-gray-500">Price per Service ($)</label>
-          <input 
-            type="number" 
-            value={price} 
+          <label className="text-[10px] uppercase tracking-widest text-gray-500">
+            Price per Service ($)
+          </label>
+          <input
+            type="number"
+            value={price}
             onChange={(e) => setPrice(Number(e.target.value))}
             className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-gold focus:outline-none focus:border-gold/50"
           />
         </div>
         <div className="space-y-2">
-          <label className="text-[10px] uppercase tracking-widest text-gray-500">Monthly Clients</label>
-          <input 
-            type="number" 
-            value={clients} 
+          <label className="text-[10px] uppercase tracking-widest text-gray-500">
+            Monthly Clients
+          </label>
+          <input
+            type="number"
+            value={clients}
             onChange={(e) => setClients(Number(e.target.value))}
             className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-gold focus:outline-none focus:border-gold/50"
           />
         </div>
         <div className="space-y-2">
-          <label className="text-[10px] uppercase tracking-widest text-gray-500">Monthly Overhead ($)</label>
-          <input 
-            type="number" 
-            value={overhead} 
+          <label className="text-[10px] uppercase tracking-widest text-gray-500">
+            Monthly Overhead ($)
+          </label>
+          <input
+            type="number"
+            value={overhead}
             onChange={(e) => setOverhead(Number(e.target.value))}
             className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-gold focus:outline-none focus:border-gold/50"
           />
@@ -168,30 +154,58 @@ const CalculatorSection = ({ idea }: { idea: BusinessIdea }) => {
           <p className="text-2xl font-serif text-white">${monthlyProfit.toLocaleString()}</p>
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-1">Annual Projection</p>
+          <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-1">
+            Annual Projection
+          </p>
           <p className="text-2xl font-serif text-gold">${annualProfit.toLocaleString()}</p>
         </div>
       </div>
-      
+
       <div className="p-4 bg-gold/10 rounded-xl border border-gold/20">
         <p className="text-xs text-gold/80 leading-relaxed italic">
-          "At this rate, you'll recover your maximum startup cost of ${idea.startupCost.max.toLocaleString()} in {Math.ceil(idea.startupCost.max / monthlyProfit)} months."
+          "At this rate, you'll recover your maximum startup cost of $
+          {idea.startupCost.max.toLocaleString()} in{' '}
+          {Math.ceil(idea.startupCost.max / monthlyProfit)} months."
         </p>
       </div>
     </div>
   );
 };
 
-const LaunchRoadmap = ({ idea, checkedSteps, onToggleStep }: { 
-  idea: BusinessIdea, 
-  checkedSteps: string[], 
-  onToggleStep: (stepId: string) => void 
+const LaunchRoadmap = ({
+  idea,
+  checkedSteps,
+  onToggleStep,
+}: {
+  idea: BusinessIdea;
+  checkedSteps: string[];
+  onToggleStep: (stepId: string) => void;
 }) => {
   const steps = [
-    { id: 'legal', day: '1-7', task: 'Legal & Setup', detail: 'Register LLC, obtain insurance, and set up a business bank account.' },
-    { id: 'equipment', day: '8-14', task: 'Equipment & Branding', detail: 'Purchase essential tools and create a basic website or Google Business Profile.' },
-    { id: 'beta', day: '15-21', task: 'Beta Launch', detail: 'Offer services to 3 friends/neighbors at cost to get initial reviews and photos.' },
-    { id: 'marketing', day: '22-30', task: 'Full Marketing', detail: 'Execute the first strategy: ' + idea.customerAcquisition[0] }
+    {
+      id: 'legal',
+      day: '1-7',
+      task: 'Legal & Setup',
+      detail: 'Register LLC, obtain insurance, and set up a business bank account.',
+    },
+    {
+      id: 'equipment',
+      day: '8-14',
+      task: 'Equipment & Branding',
+      detail: 'Purchase essential tools and create a basic website or Google Business Profile.',
+    },
+    {
+      id: 'beta',
+      day: '15-21',
+      task: 'Beta Launch',
+      detail: 'Offer services to 3 friends/neighbors at cost to get initial reviews and photos.',
+    },
+    {
+      id: 'marketing',
+      day: '22-30',
+      task: 'Full Marketing',
+      detail: 'Execute the first strategy: ' + idea.customerAcquisition[0],
+    },
   ];
 
   return (
@@ -199,25 +213,31 @@ const LaunchRoadmap = ({ idea, checkedSteps, onToggleStep }: {
       {steps.map((step, i) => {
         const stepKey = `${idea.id}-${step.id}`;
         const isChecked = checkedSteps.includes(stepKey);
-        
+
         return (
-          <div 
-            key={i} 
+          <div
+            key={i}
             className={`relative pl-10 pb-6 border-l border-white/10 last:pb-0 cursor-pointer group/step transition-opacity ${isChecked ? 'opacity-50' : 'opacity-100'}`}
             onClick={() => onToggleStep(stepKey)}
           >
-            <div className={`absolute left-[-12px] top-0 w-6 h-6 rounded-full border flex items-center justify-center transition-all ${
-              isChecked 
-                ? 'bg-gold border-gold text-luxury-black' 
-                : 'bg-luxury-black border-white/20 text-transparent group-hover/step:border-gold/50'
-            }`}>
+            <div
+              className={`absolute left-[-12px] top-0 w-6 h-6 rounded-full border flex items-center justify-center transition-all ${
+                isChecked
+                  ? 'bg-gold border-gold text-luxury-black'
+                  : 'bg-luxury-black border-white/20 text-transparent group-hover/step:border-gold/50'
+              }`}
+            >
               <CheckCircle2 className="w-4 h-4" />
             </div>
             <div className="flex justify-between items-start mb-1">
-              <h4 className={`text-sm font-bold transition-all ${isChecked ? 'text-gray-500 line-through' : 'text-white'}`}>
+              <h4
+                className={`text-sm font-bold transition-all ${isChecked ? 'text-gray-500 line-through' : 'text-white'}`}
+              >
                 {step.task}
               </h4>
-              <span className="text-[10px] font-mono text-gold bg-gold/10 px-2 py-0.5 rounded uppercase">Day {step.day}</span>
+              <span className="text-[10px] font-mono text-gold bg-gold/10 px-2 py-0.5 rounded uppercase">
+                Day {step.day}
+              </span>
             </div>
             <p className="text-xs text-gray-400 font-light leading-relaxed">{step.detail}</p>
           </div>
@@ -227,7 +247,7 @@ const LaunchRoadmap = ({ idea, checkedSteps, onToggleStep }: {
   );
 };
 
-const ComparisonModal = ({ ideas, onClose }: { ideas: BusinessIdea[], onClose: () => void }) => {
+const ComparisonModal = ({ ideas, onClose }: { ideas: BusinessIdea[]; onClose: () => void }) => {
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl">
       <motion.div
@@ -238,10 +258,15 @@ const ComparisonModal = ({ ideas, onClose }: { ideas: BusinessIdea[], onClose: (
       >
         <div className="p-10 border-b border-white/10 flex justify-between items-center bg-white/[0.02]">
           <div>
-            <span className="text-gold text-[10px] font-display font-bold uppercase tracking-[0.4em] mb-2 block">Investment Analysis</span>
+            <span className="text-gold text-[10px] font-display font-bold uppercase tracking-[0.4em] mb-2 block">
+              Investment Analysis
+            </span>
             <h2 className="text-4xl font-serif text-white">Side-by-Side Comparison</h2>
           </div>
-          <button onClick={onClose} className="w-12 h-12 flex items-center justify-center hover:bg-white/10 rounded-full transition-all border border-white/10">
+          <button
+            onClick={onClose}
+            className="w-12 h-12 flex items-center justify-center hover:bg-white/10 rounded-full transition-all border border-white/10"
+          >
             <X className="w-6 h-6" />
           </button>
         </div>
@@ -250,10 +275,18 @@ const ComparisonModal = ({ ideas, onClose }: { ideas: BusinessIdea[], onClose: (
           <div className="min-w-[900px] grid grid-cols-[250px_repeat(auto-fit,minmax(280px,1fr))] gap-12">
             {/* Header Column */}
             <div className="space-y-12 pt-32">
-              <div className="h-12 flex items-center text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold border-b border-white/5">Market Category</div>
-              <div className="h-12 flex items-center text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold border-b border-white/5">Capital Requirement</div>
-              <div className="h-12 flex items-center text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold border-b border-white/5">Revenue Potential</div>
-              <div className="h-12 flex items-center text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold border-b border-white/5">Complexity Index</div>
+              <div className="h-12 flex items-center text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold border-b border-white/5">
+                Market Category
+              </div>
+              <div className="h-12 flex items-center text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold border-b border-white/5">
+                Capital Requirement
+              </div>
+              <div className="h-12 flex items-center text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold border-b border-white/5">
+                Revenue Potential
+              </div>
+              <div className="h-12 flex items-center text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold border-b border-white/5">
+                Complexity Index
+              </div>
             </div>
 
             {/* Idea Columns */}
@@ -261,10 +294,14 @@ const ComparisonModal = ({ ideas, onClose }: { ideas: BusinessIdea[], onClose: (
               <div key={idea.id} className="space-y-12 group">
                 <div className="space-y-4 text-center">
                   <div className="h-12 flex items-center justify-center">
-                    <h3 className="text-2xl font-serif text-gold leading-tight group-hover:scale-105 transition-transform duration-500">{idea.title}</h3>
+                    <h3 className="text-2xl font-serif text-gold leading-tight group-hover:scale-105 transition-transform duration-500">
+                      {idea.title}
+                    </h3>
                   </div>
                   <div className="flex justify-center">
-                    <span className="px-3 py-1 bg-gold/10 border border-gold/20 rounded-full text-[8px] font-display font-bold uppercase tracking-widest text-gold">Grade A Asset</span>
+                    <span className="px-3 py-1 bg-gold/10 border border-gold/20 rounded-full text-[8px] font-display font-bold uppercase tracking-widest text-gold">
+                      Grade A Asset
+                    </span>
                   </div>
                 </div>
 
@@ -274,7 +311,9 @@ const ComparisonModal = ({ ideas, onClose }: { ideas: BusinessIdea[], onClose: (
 
                 <div className="h-12 flex items-center justify-center text-2xl font-serif text-white">
                   <span className="text-gold mr-2">$</span>
-                  {idea.startupCost.min.toLocaleString()} <span className="text-gray-600 mx-2">-</span> {idea.startupCost.max.toLocaleString()}
+                  {idea.startupCost.min.toLocaleString()}{' '}
+                  <span className="text-gray-600 mx-2">-</span>{' '}
+                  {idea.startupCost.max.toLocaleString()}
                 </div>
 
                 <div className="h-12 flex items-center justify-center text-2xl font-serif text-white italic">
@@ -284,13 +323,13 @@ const ComparisonModal = ({ ideas, onClose }: { ideas: BusinessIdea[], onClose: (
                 <div className="h-12 flex items-center justify-center">
                   <div className="flex gap-2">
                     {[1, 2, 3, 4, 5].map((star) => (
-                      <div 
-                        key={star} 
+                      <div
+                        key={star}
                         className={`w-3 h-3 rounded-full transition-all duration-500 ${
-                          star <= (idea.startupCost.max > 3000 ? 4 : 2) 
-                            ? 'bg-gold shadow-[0_0_15px_rgba(212,175,55,0.6)]' 
+                          star <= (idea.startupCost.max > 3000 ? 4 : 2)
+                            ? 'bg-gold shadow-[0_0_15px_rgba(212,175,55,0.6)]'
                             : 'bg-white/5 border border-white/10'
-                        }`} 
+                        }`}
                       />
                     ))}
                   </div>
@@ -304,7 +343,7 @@ const ComparisonModal = ({ ideas, onClose }: { ideas: BusinessIdea[], onClose: (
           <p className="text-gray-500 text-[10px] font-display font-bold uppercase tracking-widest">
             Confidential Investment Report • VentureX Curator
           </p>
-          <button 
+          <button
             onClick={onClose}
             className="px-8 py-3 bg-gold text-luxury-black font-display font-bold rounded-full text-[10px] uppercase tracking-widest hover:scale-105 transition-all"
           >
@@ -317,19 +356,22 @@ const ComparisonModal = ({ ideas, onClose }: { ideas: BusinessIdea[], onClose: (
 };
 
 // Auth Modal Component
-const AuthModal = ({ 
-  mode, 
-  setMode, 
-  onClose, 
-  onEmailAuth, 
-  onGoogleSignIn, 
-  error, 
-  isLoading 
-}: { 
+const AuthModal = ({
+  mode,
+  setMode,
+  onClose,
+  onEmailAuth,
+  onGoogleSignIn,
+  error,
+  isLoading,
+}: {
   mode: 'login' | 'signup' | 'forgot';
   setMode: (mode: 'login' | 'signup' | 'forgot') => void;
   onClose: () => void;
-  onEmailAuth: (mode: 'login' | 'signup' | 'forgot', data: { email: string; password?: string; displayName?: string }) => void;
+  onEmailAuth: (
+    mode: 'login' | 'signup' | 'forgot',
+    data: { email: string; password?: string; displayName?: string }
+  ) => void;
   onGoogleSignIn: () => void;
   error: string | null;
   isLoading: boolean;
@@ -355,13 +397,24 @@ const AuthModal = ({
         <div className="p-8 border-b border-white/10 flex justify-between items-center bg-white/[0.02]">
           <div>
             <h2 className="text-2xl font-serif text-white">
-              {mode === 'login' ? 'Welcome Back' : mode === 'signup' ? 'Join VentureX' : 'Reset Password'}
+              {mode === 'login'
+                ? 'Welcome Back'
+                : mode === 'signup'
+                  ? 'Join VentureX'
+                  : 'Reset Password'}
             </h2>
             <p className="text-xs text-gray-400 mt-1">
-              {mode === 'login' ? 'Sign in to access your blueprints' : mode === 'signup' ? 'Start your journey to simple wealth' : 'Enter your email to receive a reset link'}
+              {mode === 'login'
+                ? 'Sign in to access your blueprints'
+                : mode === 'signup'
+                  ? 'Start your journey to simple wealth'
+                  : 'Enter your email to receive a reset link'}
             </p>
           </div>
-          <button onClick={onClose} className="w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full transition-all">
+          <button
+            onClick={onClose}
+            className="w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full transition-all"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -377,7 +430,9 @@ const AuthModal = ({
           <form onSubmit={handleSubmit} className="space-y-4">
             {mode === 'signup' && (
               <div className="space-y-2">
-                <label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Full Name</label>
+                <label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">
+                  Full Name
+                </label>
                 <div className="relative">
                   <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                   <input
@@ -393,7 +448,9 @@ const AuthModal = ({
             )}
 
             <div className="space-y-2">
-              <label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Email Address</label>
+              <label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">
+                Email Address
+              </label>
               <div className="relative">
                 <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                 <input
@@ -410,9 +467,11 @@ const AuthModal = ({
             {mode !== 'forgot' && (
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
-                  <label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Password</label>
+                  <label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">
+                    Password
+                  </label>
                   {mode === 'login' && (
-                    <button 
+                    <button
                       type="button"
                       onClick={() => setMode('forgot')}
                       className="text-[10px] text-gold hover:underline uppercase tracking-widest font-bold"
@@ -448,10 +507,14 @@ const AuthModal = ({
               className="w-full py-4 gold-gradient text-luxury-black font-display font-bold rounded-xl text-sm uppercase tracking-widest shadow-lg hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {isLoading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
+                <LoadingSpinner className="w-5 h-5 border-2 border-gold/20 border-t-gold rounded-full animate-spin" />
               ) : (
                 <>
-                  {mode === 'login' ? 'Sign In' : mode === 'signup' ? 'Create Account' : 'Send Reset Link'}
+                  {mode === 'login'
+                    ? 'Sign In'
+                    : mode === 'signup'
+                      ? 'Create Account'
+                      : 'Send Reset Link'}
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
@@ -475,10 +538,22 @@ const AuthModal = ({
                 className="w-full py-3 bg-white/5 border border-white/10 rounded-xl text-sm text-white font-medium hover:bg-white/10 transition-all flex items-center justify-center gap-3"
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
-                  <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                  <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-                  <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.66l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                  <path
+                    fill="currentColor"
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  />
+                  <path
+                    fill="currentColor"
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  />
+                  <path
+                    fill="currentColor"
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                  />
+                  <path
+                    fill="currentColor"
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.66l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                  />
                 </svg>
                 Google
               </button>
@@ -492,7 +567,9 @@ const AuthModal = ({
               }}
               className="text-xs text-gray-400 hover:text-gold transition-colors"
             >
-              {mode === 'login' ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
+              {mode === 'login'
+                ? "Don't have an account? Sign up"
+                : 'Already have an account? Sign in'}
             </button>
           </div>
         </div>
@@ -505,7 +582,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAdminByClaims, setIsAdminByClaims] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 180);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [selectedIdea, setSelectedIdea] = useState<BusinessIdea | null>(null);
@@ -520,11 +597,14 @@ export default function App() {
   const [showDeduplicateConfirm, setShowDeduplicateConfirm] = useState(false);
   const [showAutoEnhanceConfirm, setShowAutoEnhanceConfirm] = useState(false);
   const [showRevertConfirm, setShowRevertConfirm] = useState(false);
-  const [adminFeedback, setAdminFeedback] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [adminFeedback, setAdminFeedback] = useState<{
+    message: string;
+    type: 'success' | 'error' | 'info';
+  } | null>(null);
   const feedbackCooldownRef = useRef<Record<string, number>>({});
   /** Avoid repeating the unverified-admin Firestore toast once we've shown it (cleared when email verifies). */
   const unverifiedIdeasPermissionToastShownRef = useRef(false);
-  
+
   const showAdminFeedback = (
     feedback: { message: string; type: 'success' | 'error' | 'info' },
     cooldownMs = 0
@@ -535,14 +615,14 @@ export default function App() {
     if (cooldownMs > 0 && now - lastShownAt < cooldownMs) return;
 
     feedbackCooldownRef.current[feedbackKey] = now;
-    setAdminFeedback(current =>
+    setAdminFeedback((current) =>
       current?.message === feedback.message && current?.type === feedback.type ? current : feedback
     );
   };
 
   // Auth State
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'signup' | 'forgot'>('login');
+  const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [sessionPhase, setSessionPhase] = useState<SessionPhase>('auth-loading');
@@ -569,7 +649,7 @@ export default function App() {
         isAnonymous: auth.currentUser?.isAnonymous,
       },
       operationType,
-      path
+      path,
     };
     console.error('Firestore Error: ', JSON.stringify(errInfo));
 
@@ -616,7 +696,7 @@ export default function App() {
   };
   const mouseX = useMotionValue(0);
   const mouseY = useMotionValue(0);
-  
+
   const springConfig = { damping: 25, stiffness: 150 };
   const dotX = useSpring(mouseX, springConfig);
   const dotY = useSpring(mouseY, springConfig);
@@ -639,38 +719,6 @@ export default function App() {
     }
   }, [adminFeedback]);
 
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      setDebouncedSearchQuery(searchQuery);
-    }, 180);
-    return () => window.clearTimeout(timeoutId);
-  }, [searchQuery]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const evaluateVisualProfile = () => {
-      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      const smallScreen = window.matchMedia('(max-width: 768px)').matches;
-      const cpuCores = navigator.hardwareConcurrency || 8;
-      const memoryEstimate = (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 8;
-
-      if (reducedMotion || smallScreen || cpuCores <= 4 || memoryEstimate <= 4) {
-        setVisualPerfProfile('low-power');
-        return;
-      }
-      if (cpuCores <= 6 || memoryEstimate <= 6) {
-        setVisualPerfProfile('balanced');
-        return;
-      }
-      setVisualPerfProfile('high-fidelity');
-    };
-
-    evaluateVisualProfile();
-    window.addEventListener('resize', evaluateVisualProfile);
-    return () => window.removeEventListener('resize', evaluateVisualProfile);
-  }, []);
-
   const [allIdeas, setAllIdeas] = useState<BusinessIdea[]>(CLEAN_BUSINESS_IDEAS);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -678,7 +726,9 @@ export default function App() {
   const [showAdminMenu, setShowAdminMenu] = useState(false);
 
   const [editForm, setEditForm] = useState<Partial<BusinessIdea>>({});
-  const [activeTab, setActiveTab] = useState<'overview' | 'calculator' | 'roadmap' | 'resources'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'calculator' | 'roadmap' | 'resources'>(
+    'overview'
+  );
   const [favorites, setFavorites] = useState<string[]>([]);
   const [generatedNames, setGeneratedNames] = useState<Record<string, string[]>>({});
   const [isNaming, setIsNaming] = useState(false);
@@ -698,9 +748,13 @@ export default function App() {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [modifiedIds, setModifiedIds] = useState<Set<string>>(new Set());
   const [visibleIdeaCount, setVisibleIdeaCount] = useState(IDEAS_WINDOW_SIZE);
-  const [visualPerfProfile, setVisualPerfProfile] = useState<VisualPerfProfile>('high-fidelity');
+  const visualPerfProfile = useVisualPerfProfile();
   const modifiedIdsPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const localProfileCacheRef = useRef<{ favorites: string[]; checkedSteps: string[]; paidHint: boolean }>({
+  const localProfileCacheRef = useRef<{
+    favorites: string[];
+    checkedSteps: string[];
+    paidHint: boolean;
+  }>({
     favorites: [],
     checkedSteps: [],
     paidHint: false,
@@ -720,7 +774,7 @@ export default function App() {
     };
 
     const cleanupIdle = runWhenIdle(async () => {
-      const saved = await get('venturex_modified') || await get('boring_ventures_modified');
+      const saved = (await get('venturex_modified')) || (await get('boring_ventures_modified'));
       if (saved && !isCancelled) {
         try {
           setModifiedIds(new Set(JSON.parse(saved)));
@@ -771,7 +825,11 @@ export default function App() {
     let response = await fetch('/api/billing/verify-entitlement', requestInit);
     let rawBody = await response.text();
 
-    if (rawBody.trim().startsWith('<!DOCTYPE') || rawBody.trim().startsWith('<html') || response.status === 404) {
+    if (
+      rawBody.trim().startsWith('<!DOCTYPE') ||
+      rawBody.trim().startsWith('<html') ||
+      response.status === 404
+    ) {
       response = await fetch('/.netlify/functions/verify-entitlement', requestInit);
       rawBody = await response.text();
     }
@@ -839,7 +897,8 @@ export default function App() {
             if (isCancelled) return;
             setEntitlementState('paymentPending');
             setAdminFeedback({
-              message: 'Payment received. Access is being confirmed securely. Please refresh in a moment.',
+              message:
+                'Payment received. Access is being confirmed securely. Please refresh in a moment.',
               type: 'info',
             });
           }
@@ -876,56 +935,58 @@ export default function App() {
     let isCancelled = false;
 
     const userDocRef = doc(db, 'users', user.uid);
-    const unsubscribe = onSnapshot(userDocRef, (doc) => {
-      if (isCancelled) return;
-      if (doc.exists()) {
-        const data = doc.data();
-        setIsPaid(data.isPaid === true || data.role === 'pro');
-        setFavorites(Array.isArray(data.favorites) ? data.favorites : []);
-        setCheckedSteps(Array.isArray(data.checkedSteps) ? data.checkedSteps : []);
+    const unsubscribe = onSnapshot(
+      userDocRef,
+      (doc) => {
+        if (isCancelled) return;
+        if (doc.exists()) {
+          const data = doc.data();
+          setIsPaid(hasPaidEntitlement(data));
+          setFavorites(Array.isArray(data.favorites) ? data.favorites : []);
+          setCheckedSteps(Array.isArray(data.checkedSteps) ? data.checkedSteps : []);
 
-        // One-time migration of local profile cache only when remote is empty.
-        if (migratedProfileUidRef.current !== user.uid) {
-          const cached = localProfileCacheRef.current;
-          const updates: Record<string, unknown> = {};
-          const remoteFavorites = Array.isArray(data.favorites) ? data.favorites : [];
-          const remoteSteps = Array.isArray(data.checkedSteps) ? data.checkedSteps : [];
+          // One-time migration of local profile cache only when remote is empty.
+          if (migratedProfileUidRef.current !== user.uid) {
+            const cached = localProfileCacheRef.current;
+            const updates: Record<string, unknown> = {};
+            const remoteFavorites = Array.isArray(data.favorites) ? data.favorites : [];
+            const remoteSteps = Array.isArray(data.checkedSteps) ? data.checkedSteps : [];
 
-          if (remoteFavorites.length === 0 && cached.favorites.length > 0) {
-            updates.favorites = cached.favorites;
+            if (remoteFavorites.length === 0 && cached.favorites.length > 0) {
+              updates.favorites = cached.favorites;
+            }
+
+            if (remoteSteps.length === 0 && cached.checkedSteps.length > 0) {
+              updates.checkedSteps = cached.checkedSteps;
+            }
+
+            if (Object.keys(updates).length > 0) {
+              updateDoc(userDocRef, {
+                ...updates,
+                updatedAt: serverTimestamp(),
+              }).catch((err) =>
+                handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`, 'background')
+              );
+            }
+            migratedProfileUidRef.current = user.uid;
           }
-
-          if (remoteSteps.length === 0 && cached.checkedSteps.length > 0) {
-            updates.checkedSteps = cached.checkedSteps;
-          }
-
-          if (Object.keys(updates).length > 0) {
-            updateDoc(userDocRef, {
-              ...updates,
-              updatedAt: serverTimestamp(),
-            }).catch((err) =>
-              handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`, 'background')
-            );
-          }
-          migratedProfileUidRef.current = user.uid;
+          setSessionPhase('ready');
+        } else {
+          // Create user doc if it doesn't exist
+          setDoc(userDocRef, {
+            uid: user.uid,
+            email: user.email,
+            createdAt: serverTimestamp(),
+            isPaid: false,
+            role: 'user',
+            favorites: [],
+            checkedSteps: [],
+          }).catch((err) =>
+            handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`, 'background')
+          );
         }
-        setSessionPhase('ready');
-      } else {
-        // Create user doc if it doesn't exist
-        setDoc(userDocRef, {
-          uid: user.uid,
-          email: user.email,
-          createdAt: serverTimestamp(),
-          isPaid: false,
-          role: 'user',
-          favorites: [],
-          checkedSteps: []
-        }).catch(err =>
-          handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`, 'background')
-        );
-      }
-    }, (error) =>
-      {
+      },
+      (error) => {
         if (!isCancelled) {
           setSessionPhase('error');
         }
@@ -977,7 +1038,7 @@ export default function App() {
       if (!response.ok) {
         throw new Error(session?.error || `Server error: ${response.status}`);
       }
-      
+
       if (session.url) {
         console.log('[Stripe] Redirecting to Checkout:', session.url);
         // Using _blank to avoid iframe security blocks (white screen)
@@ -988,11 +1049,11 @@ export default function App() {
       }
     } catch (error: any) {
       console.error('Checkout Error:', error);
-      setAdminFeedback({ 
-        message: error.message?.includes('STRIPE_SECRET_KEY') 
+      setAdminFeedback({
+        message: error.message?.includes('STRIPE_SECRET_KEY')
           ? 'Stripe Keys missing. Go to Settings > Environment Variables.'
-          : `Checkout Error: ${error.message || 'Failed to start payment'}`, 
-        type: 'error' 
+          : `Checkout Error: ${error.message || 'Failed to start payment'}`,
+        type: 'error',
       });
     } finally {
       setIsProcessingPayment(false);
@@ -1000,7 +1061,14 @@ export default function App() {
   };
   // Handle Body Scroll Locking
   useEffect(() => {
-    const isLocked = !!(selectedIdea || showPaywall || showPrivacy || showTerms || showComparison || showExecutionPlan);
+    const isLocked = !!(
+      selectedIdea ||
+      showPaywall ||
+      showPrivacy ||
+      showTerms ||
+      showComparison ||
+      showExecutionPlan
+    );
     if (isLocked) {
       document.documentElement.style.overflow = 'hidden';
       document.body.style.overflow = 'hidden';
@@ -1066,48 +1134,62 @@ export default function App() {
     if (!user) return;
 
     const ideasQuery = collection(db, 'ideas');
-    const unsubscribe = onSnapshot(ideasQuery, (snapshot) => {
-      if (snapshot.empty) {
-        console.log('Firestore is empty. Skipping sync to prevent data loss.');
-        return;
-      }
+    const unsubscribe = onSnapshot(
+      ideasQuery,
+      (snapshot) => {
+        if (snapshot.empty) {
+          console.log('Firestore is empty. Skipping sync to prevent data loss.');
+          return;
+        }
 
-      const firestoreIdeas = snapshot.docs.map(doc => doc.data() as BusinessIdea);
-      
-      setAllIdeas(prev => {
-        const newIdeas = [...prev];
-        
-        firestoreIdeas.forEach(fIdea => {
-          const index = newIdeas.findIndex(m => m.id === fIdea.id);
-          if (index === -1) {
-            newIdeas.push(fIdea);
-          } else {
-            // If admin, only overwrite if we haven't modified this specific idea locally
-            // OR if the local one is a placeholder and remote is real
-            const localIdea = newIdeas[index];
-            const isLocalPlaceholder = !localIdea.image || localIdea.image.includes('picsum.photos') || localIdea.image.includes('1562016600-ece13e8ba570');
-            const isRemoteReal = fIdea.image && !fIdea.image.includes('picsum.photos') && !fIdea.image.includes('1562016600-ece13e8ba570');
-            
-            const shouldOverwrite = !(isAdmin || isUnverifiedAdmin) || !modifiedIds.has(fIdea.id) || (isLocalPlaceholder && isRemoteReal);
-            
-            if (shouldOverwrite) {
-              newIdeas[index] = fIdea;
+        const firestoreIdeas = snapshot.docs.map((doc) => doc.data() as BusinessIdea);
+
+        setAllIdeas((prev) => {
+          const newIdeas = [...prev];
+
+          firestoreIdeas.forEach((fIdea) => {
+            const index = newIdeas.findIndex((m) => m.id === fIdea.id);
+            if (index === -1) {
+              newIdeas.push(fIdea);
+            } else {
+              // If admin, only overwrite if we haven't modified this specific idea locally
+              // OR if the local one is a placeholder and remote is real
+              const localIdea = newIdeas[index];
+              if (!localIdea) return;
+              const isLocalPlaceholder =
+                !localIdea.image ||
+                localIdea.image.includes('picsum.photos') ||
+                localIdea.image.includes('1562016600-ece13e8ba570');
+              const isRemoteReal =
+                fIdea.image &&
+                !fIdea.image.includes('picsum.photos') &&
+                !fIdea.image.includes('1562016600-ece13e8ba570');
+
+              const shouldOverwrite =
+                !(isAdmin || isUnverifiedAdmin) ||
+                !modifiedIds.has(fIdea.id) ||
+                (isLocalPlaceholder && isRemoteReal);
+
+              if (shouldOverwrite) {
+                newIdeas[index] = fIdea;
+              }
             }
-          }
+          });
+
+          return newIdeas;
         });
-        
-        return newIdeas;
-      });
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'ideas', 'listener');
-    });
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'ideas', 'listener');
+      }
+    );
 
     return () => unsubscribe();
   }, [isLoading, user, isAdmin, isUnverifiedAdmin]);
 
   // Get user location for "Trending" feature
   useEffect(() => {
-    if (!("geolocation" in navigator)) return;
+    if (!('geolocation' in navigator)) return;
 
     let isCancelled = false;
     const controller = new AbortController();
@@ -1122,13 +1204,14 @@ export default function App() {
             { signal: controller.signal }
           );
           const data = await res.json();
-          const city = data.address.city || data.address.town || data.address.village || 'your area';
+          const city =
+            data.address.city || data.address.town || data.address.village || 'your area';
           if (!isCancelled) {
             setUserLocation(city);
           }
         } catch (e: any) {
           if (e?.name !== 'AbortError') {
-            console.error("Error fetching location name:", e);
+            console.error('Error fetching location name:', e);
           }
         } finally {
           window.clearTimeout(geoTimeoutId);
@@ -1155,11 +1238,13 @@ export default function App() {
     let isCancelled = false;
     const loadIdeas = async () => {
       try {
-        const saved = await get('venturex_ideas') || await get('boring_ventures_ideas');
-        const savedFavs = await get('venturex_favorites') || await get('boring_ventures_favorites');
-        const savedSteps = await get('venturex_steps') || await get('boring_ventures_steps');
-        const savedPaid = await get('venturex_paid') || await get('boring_ventures_paid');
-        const legacySaved = localStorage.getItem('venturex_ideas') || localStorage.getItem('boring_ventures_ideas');
+        const saved = (await get('venturex_ideas')) || (await get('boring_ventures_ideas'));
+        const savedFavs =
+          (await get('venturex_favorites')) || (await get('boring_ventures_favorites'));
+        const savedSteps = (await get('venturex_steps')) || (await get('boring_ventures_steps'));
+        const savedPaid = (await get('venturex_paid')) || (await get('boring_ventures_paid'));
+        const legacySaved =
+          localStorage.getItem('venturex_ideas') || localStorage.getItem('boring_ventures_ideas');
 
         const parsedLocalFavorites = savedFavs ? JSON.parse(savedFavs) : [];
         const parsedLocalSteps = savedSteps ? JSON.parse(savedSteps) : [];
@@ -1169,7 +1254,7 @@ export default function App() {
           checkedSteps: Array.isArray(parsedLocalSteps) ? parsedLocalSteps : [],
           paidHint: parsedLocalPaidHint,
         };
-        
+
         // For signed-in users, Firestore profile is authoritative.
         // Avoid stale local cache overwriting server state after auth hydration.
         const shouldHydrateFromLocalProfile = !auth.currentUser;
@@ -1188,11 +1273,13 @@ export default function App() {
         }
 
         let ideasToUse = CLEAN_BUSINESS_IDEAS;
-        
+
         if (saved) {
           const savedIdeas = JSON.parse(saved);
           // Merge new default ideas that don't exist in saved state
-          const newDefaults = CLEAN_BUSINESS_IDEAS.filter(def => !savedIdeas.some((s: BusinessIdea) => s.id === def.id));
+          const newDefaults = CLEAN_BUSINESS_IDEAS.filter(
+            (def) => !savedIdeas.some((s: BusinessIdea) => s.id === def.id)
+          );
           if (newDefaults.length > 0) {
             console.log(`Merging ${newDefaults.length} new default ideas...`);
             ideasToUse = [...savedIdeas, ...newDefaults];
@@ -1208,25 +1295,28 @@ export default function App() {
           try {
             const legacyIdeas = JSON.parse(legacySaved);
             const hasCustomChanges = legacyIdeas.some((idea: any) => {
-              const defaultIdea = CLEAN_BUSINESS_IDEAS.find(i => i.id === idea.id);
-              return !defaultIdea || idea.image !== defaultIdea.image || idea.title !== defaultIdea.title;
+              const defaultIdea = CLEAN_BUSINESS_IDEAS.find((i) => i.id === idea.id);
+              return (
+                !defaultIdea || idea.image !== defaultIdea.image || idea.title !== defaultIdea.title
+              );
             });
 
             // If we have custom changes in legacy and IndexedDB is either empty or just the default
-            const isIndexedDBDefault = !saved || JSON.stringify(ideasToUse) === JSON.stringify(CLEAN_BUSINESS_IDEAS);
-            
+            const isIndexedDBDefault =
+              !saved || JSON.stringify(ideasToUse) === JSON.stringify(CLEAN_BUSINESS_IDEAS);
+
             if (hasCustomChanges && isIndexedDBDefault) {
               console.log('Found custom changes in legacy storage. Migrating...');
               // Even when migrating from legacy, we must merge new defaults
               const legacyIdeas = JSON.parse(legacySaved);
               const mergedWithLegacy = [...legacyIdeas];
-              
-              CLEAN_BUSINESS_IDEAS.forEach(def => {
-                if (!mergedWithLegacy.some(s => s.id === def.id)) {
+
+              CLEAN_BUSINESS_IDEAS.forEach((def) => {
+                if (!mergedWithLegacy.some((s) => s.id === def.id)) {
                   mergedWithLegacy.push(def);
                 }
               });
-              
+
               ideasToUse = mergedWithLegacy;
               await set('venturex_ideas', JSON.stringify(mergedWithLegacy));
             }
@@ -1234,7 +1324,7 @@ export default function App() {
             console.error('Error parsing legacy data:', err);
           }
         }
-        
+
         if (!isCancelled) {
           setAllIdeas(ideasToUse);
         }
@@ -1276,7 +1366,7 @@ export default function App() {
 
   useEffect(() => {
     if (isLoading) return; // Don't save during initial load
-    
+
     const saveIdeas = async () => {
       try {
         await set('venturex_ideas', JSON.stringify(allIdeas));
@@ -1310,7 +1400,7 @@ export default function App() {
     try {
       const { writeBatch } = await import('firebase/firestore');
       const batch = writeBatch(db);
-      allIdeas.forEach(idea => {
+      allIdeas.forEach((idea) => {
         const ideaDocRef = doc(db, 'ideas', idea.id);
         batch.set(ideaDocRef, idea);
       });
@@ -1319,7 +1409,7 @@ export default function App() {
       setModifiedIds(new Set()); // Clear modified tracking after successful sync
       setAdminFeedback({
         message: 'Successfully synced all changes to the cloud!',
-        type: 'success'
+        type: 'success',
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'ideas');
@@ -1336,13 +1426,13 @@ export default function App() {
       const { getDocs } = await import('firebase/firestore');
       const ideasQuery = collection(db, 'ideas');
       const querySnapshot = await getDocs(ideasQuery);
-      
+
       if (querySnapshot.empty) {
         setAdminFeedback({ message: 'Cloud is empty. Nothing to revert to.', type: 'info' });
         return;
       }
 
-      const firestoreIdeas = querySnapshot.docs.map(doc => doc.data() as BusinessIdea);
+      const firestoreIdeas = querySnapshot.docs.map((doc) => doc.data() as BusinessIdea);
       setAllIdeas(firestoreIdeas);
       setModifiedIds(new Set());
       setAdminFeedback({ message: 'Successfully reverted to cloud state.', type: 'success' });
@@ -1355,7 +1445,7 @@ export default function App() {
 
   const downloadBackup = () => {
     const dataStr = JSON.stringify(allIdeas, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+    const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
     const exportFileDefaultName = `business_ventures_backup_${new Date().toISOString().split('T')[0]}.json`;
     const linkElement = document.createElement('a');
     linkElement.setAttribute('href', dataUri);
@@ -1370,7 +1460,10 @@ export default function App() {
     const previousIdeas = allIdeas;
     const reader = new FileReader();
     reader.onerror = () => {
-      setAdminFeedback({ message: 'Could not read backup file. Your current data is unchanged.', type: 'error' });
+      setAdminFeedback({
+        message: 'Could not read backup file. Your current data is unchanged.',
+        type: 'error',
+      });
     };
     reader.onload = (event) => {
       try {
@@ -1384,14 +1477,14 @@ export default function App() {
         const validIdeas = parsed.filter((idea: any) => {
           return Boolean(
             idea &&
-              typeof idea.id === 'string' &&
-              typeof idea.title === 'string' &&
-              typeof idea.category === 'string' &&
-              typeof idea.description === 'string' &&
-              idea.startupCost &&
-              typeof idea.startupCost.min === 'number' &&
-              typeof idea.startupCost.max === 'number' &&
-              Array.isArray(idea.customerAcquisition)
+            typeof idea.id === 'string' &&
+            typeof idea.title === 'string' &&
+            typeof idea.category === 'string' &&
+            typeof idea.description === 'string' &&
+            idea.startupCost &&
+            typeof idea.startupCost.min === 'number' &&
+            typeof idea.startupCost.max === 'number' &&
+            Array.isArray(idea.customerAcquisition)
           );
         }) as BusinessIdea[];
 
@@ -1440,9 +1533,13 @@ export default function App() {
     } catch (error: any) {
       console.error('Google Sign In failed:', error);
       if (error.code === 'auth/popup-closed-by-user') {
-        setAuthError('Sign-in window was closed. Please try again or use the "Open in new tab" icon at the top of the app.');
+        setAuthError(
+          'Sign-in window was closed. Please try again or use the "Open in new tab" icon at the top of the app.'
+        );
       } else if (error.code === 'auth/popup-blocked') {
-        setAuthError('Pop-up blocked! Please enable pop-ups for this site or use Email/Password below.');
+        setAuthError(
+          'Pop-up blocked! Please enable pop-ups for this site or use Email/Password below.'
+        );
       } else {
         setAuthError(error.message);
       }
@@ -1451,7 +1548,10 @@ export default function App() {
     }
   };
 
-  const handleEmailAuth = async (mode: 'login' | 'signup' | 'forgot', data: { email: string; password?: string; displayName?: string }) => {
+  const handleEmailAuth = async (
+    mode: 'login' | 'signup' | 'forgot',
+    data: { email: string; password?: string; displayName?: string }
+  ) => {
     setIsAuthLoading(true);
     setAuthError(null);
 
@@ -1460,12 +1560,19 @@ export default function App() {
         await signInWithEmailAndPassword(auth, data.email, data.password || '');
         setShowAuthModal(false);
       } else if (mode === 'signup') {
-        const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password || '');
+        const userCredential = await createUserWithEmailAndPassword(
+          auth,
+          data.email,
+          data.password || ''
+        );
         if (data.displayName) {
           await updateProfile(userCredential.user, { displayName: data.displayName });
         }
         await sendEmailVerification(userCredential.user);
-        setAdminFeedback({ message: 'Account created! Please check your email for verification.', type: 'success' });
+        setAdminFeedback({
+          message: 'Account created! Please check your email for verification.',
+          type: 'success',
+        });
         setShowAuthModal(false);
       } else if (mode === 'forgot') {
         await sendPasswordResetEmail(auth, data.email);
@@ -1476,7 +1583,8 @@ export default function App() {
       console.error('Auth failed:', error);
       let friendlyError = error.message;
       if (error.code === 'auth/invalid-credential') {
-        friendlyError = 'Invalid email or password. If you haven\'t created an account yet, please click "Sign up" below. Or try the Google button for instant access.';
+        friendlyError =
+          'Invalid email or password. If you haven\'t created an account yet, please click "Sign up" below. Or try the Google button for instant access.';
       } else if (error.code === 'auth/user-not-found') {
         friendlyError = 'No account found with this email. Please sign up first!';
       }
@@ -1499,11 +1607,11 @@ export default function App() {
       try {
         await auth.currentUser.reload();
         setUser(auth.currentUser);
-        
+
         if (auth.currentUser.emailVerified) {
           setAdminFeedback({
             message: 'Your email is already verified!',
-            type: 'success'
+            type: 'success',
           });
           return;
         }
@@ -1511,13 +1619,13 @@ export default function App() {
         await sendEmailVerification(auth.currentUser);
         setAdminFeedback({
           message: 'Verification email sent! Please check your inbox.',
-          type: 'success'
+          type: 'success',
         });
       } catch (error: any) {
         console.error('Failed to send verification email:', error);
         setAdminFeedback({
           message: `Failed to send email: ${error.message}`,
-          type: 'error'
+          type: 'error',
         });
       }
     }
@@ -1525,10 +1633,10 @@ export default function App() {
 
   const toggleStep = async (stepKey: string) => {
     const isChecked = checkedSteps.includes(stepKey);
-    const newSteps = isChecked 
-      ? checkedSteps.filter(k => k !== stepKey) 
+    const newSteps = isChecked
+      ? checkedSteps.filter((k) => k !== stepKey)
       : [...checkedSteps, stepKey];
-    
+
     setCheckedSteps(newSteps);
 
     if (user) {
@@ -1536,7 +1644,7 @@ export default function App() {
       try {
         await updateDoc(userDocRef, {
           checkedSteps: isChecked ? arrayRemove(stepKey) : arrayUnion(stepKey),
-          updatedAt: serverTimestamp()
+          updatedAt: serverTimestamp(),
         });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
@@ -1546,14 +1654,14 @@ export default function App() {
 
   const handleSaveEdit = async () => {
     if (!editForm.title || !editForm.id) return;
-    
+
     const updatedIdea = { ...selectedIdea, ...editForm } as BusinessIdea;
 
     // Update Local State
-    setAllIdeas(prev => {
-      const exists = prev.find(i => i.id === editForm.id);
+    setAllIdeas((prev) => {
+      const exists = prev.find((i) => i.id === editForm.id);
       if (exists) {
-        return prev.map(i => i.id === editForm.id ? updatedIdea : i);
+        return prev.map((i) => (i.id === editForm.id ? updatedIdea : i));
       } else {
         return [...prev, updatedIdea];
       }
@@ -1564,17 +1672,17 @@ export default function App() {
       try {
         const ideaDocRef = doc(db, 'ideas', updatedIdea.id);
         await setDoc(ideaDocRef, updatedIdea);
-        setModifiedIds(prev => {
+        setModifiedIds((prev) => {
           const next = new Set(prev);
           next.delete(updatedIdea.id);
           return next;
         });
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, `ideas/${updatedIdea.id}`);
-        setModifiedIds(prev => new Set(prev).add(updatedIdea.id));
+        setModifiedIds((prev) => new Set(prev).add(updatedIdea.id));
       }
     } else if (isUnverifiedAdmin) {
-      setModifiedIds(prev => new Set(prev).add(updatedIdea.id));
+      setModifiedIds((prev) => new Set(prev).add(updatedIdea.id));
     }
 
     setSelectedIdea(updatedIdea);
@@ -1596,9 +1704,9 @@ export default function App() {
       startupCost: { min: 500, max: 2000 },
       potentialIncome: '$50,000 - $100,000/year',
       customerAcquisition: ['Strategy 1', 'Strategy 2'],
-      upsell: 'Offer a premium service package or maintenance plan.'
+      upsell: 'Offer a premium service package or maintenance plan.',
     };
-    setAllIdeas(prev => [newIdea, ...prev]);
+    setAllIdeas((prev) => [newIdea, ...prev]);
     setIsCreatingOpportunity(true);
     setSelectedIdea(newIdea);
     setIsEditing(true);
@@ -1629,7 +1737,7 @@ export default function App() {
   const toggleFavorite = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const isFav = favorites.includes(id);
-    const newFavs = isFav ? favorites.filter(fid => fid !== id) : [...favorites, id];
+    const newFavs = isFav ? favorites.filter((fid) => fid !== id) : [...favorites, id];
     setFavorites(newFavs);
     set('venturex_favorites', JSON.stringify(newFavs));
 
@@ -1638,7 +1746,7 @@ export default function App() {
       try {
         await updateDoc(userDocRef, {
           favorites: isFav ? arrayRemove(id) : arrayUnion(id),
-          updatedAt: serverTimestamp()
+          updatedAt: serverTimestamp(),
         });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
@@ -1659,10 +1767,10 @@ export default function App() {
       const { generateBrandNames } = await import('./services/geminiService');
       const names = await generateBrandNames(idea.title);
       if (names.length > 0) {
-        setGeneratedNames(prev => ({ ...prev, [idea.id]: names }));
+        setGeneratedNames((prev) => ({ ...prev, [idea.id]: names }));
       }
     } catch (error) {
-      console.error("Error generating names:", error);
+      console.error('Error generating names:', error);
     } finally {
       setIsNaming(false);
     }
@@ -1672,7 +1780,7 @@ export default function App() {
     const target = pendingDeleteIdea ?? selectedIdea;
     if (!target) return;
 
-    const updatedIdeas = allIdeas.filter(i => i.id !== target.id);
+    const updatedIdeas = allIdeas.filter((i) => i.id !== target.id);
     setAllIdeas(updatedIdeas);
     setSelectedIdea(null);
     setIsCreatingOpportunity(false);
@@ -1686,7 +1794,7 @@ export default function App() {
     const seenTitles = new Map<string, BusinessIdea>();
 
     // We want to prioritize ideas that have custom descriptions
-    allIdeas.forEach(idea => {
+    allIdeas.forEach((idea) => {
       const existing = seenTitles.get(idea.title);
       if (!existing) {
         seenTitles.set(idea.title, idea);
@@ -1704,7 +1812,7 @@ export default function App() {
   };
 
   const hasDuplicates = useMemo(() => {
-    const titles = allIdeas.map(i => i.title);
+    const titles = allIdeas.map((i) => i.title);
     return new Set(titles).size !== titles.length;
   }, [allIdeas]);
 
@@ -1714,7 +1822,7 @@ export default function App() {
         idea.title,
         idea.description,
         idea.category,
-        idea.customerAcquisition.join(' ')
+        idea.customerAcquisition.join(' '),
       ]
         .join(' ')
         .toLowerCase();
@@ -1725,20 +1833,20 @@ export default function App() {
 
   const filteredIdeas = useMemo(() => {
     let baseIdeas = allIdeas;
-    
+
     if (selectedCategory === 'Shortlisted') {
-      baseIdeas = baseIdeas.filter(idea => favorites.includes(idea.id));
+      baseIdeas = baseIdeas.filter((idea) => favorites.includes(idea.id));
     } else if (selectedCategory !== 'All') {
-      baseIdeas = baseIdeas.filter(idea => idea.category === selectedCategory);
+      baseIdeas = baseIdeas.filter((idea) => idea.category === selectedCategory);
     }
 
     const effectiveQuery = (debouncedSearchQuery + ' ' + (activeTag || '')).trim().toLowerCase();
     let results = baseIdeas;
     if (effectiveQuery) {
-      const keywords = effectiveQuery.split(/\s+/).filter(k => k.length > 0);
-      results = baseIdeas.filter(idea => {
+      const keywords = effectiveQuery.split(/\s+/).filter((k) => k.length > 0);
+      results = baseIdeas.filter((idea) => {
         const normalized = ideaSearchIndex.get(idea.id) || '';
-        return keywords.every(keyword => normalized.includes(keyword));
+        return keywords.every((keyword) => normalized.includes(keyword));
       });
     }
 
@@ -1747,7 +1855,15 @@ export default function App() {
       return results.slice(0, 10);
     }
     return results;
-  }, [debouncedSearchQuery, selectedCategory, activeTag, allIdeas, hasAccess, favorites, ideaSearchIndex]);
+  }, [
+    debouncedSearchQuery,
+    selectedCategory,
+    activeTag,
+    allIdeas,
+    hasAccess,
+    favorites,
+    ideaSearchIndex,
+  ]);
 
   useEffect(() => {
     setVisibleIdeaCount(IDEAS_WINDOW_SIZE);
@@ -1777,14 +1893,14 @@ export default function App() {
 
     setIsGenerating(true);
     try {
-      const existingTitles = allIdeas.map(i => i.title);
+      const existingTitles = allIdeas.map((i) => i.title);
       const { generateNewIdeas } = await import('./services/geminiService');
       const newIdeas = await generateNewIdeas(existingTitles);
       if (newIdeas && newIdeas.length > 0) {
-        setAllIdeas(prev => [...prev, ...newIdeas]);
+        setAllIdeas((prev) => [...prev, ...newIdeas]);
       }
     } catch (error) {
-      console.error("Error generating ideas:", error);
+      console.error('Error generating ideas:', error);
     } finally {
       setIsGenerating(false);
     }
@@ -1793,8 +1909,10 @@ export default function App() {
   if (!isAuthReady) {
     return (
       <div className="min-h-screen bg-luxury-black flex flex-col items-center justify-center gap-6">
-        <div className="w-16 h-16 border-2 border-gold/20 border-t-gold rounded-full animate-spin" />
-        <p className="text-gray-500 font-display font-bold uppercase tracking-[0.3em] text-[10px]">Initializing VentureX</p>
+        <LoadingSpinner className="w-16 h-16 border-2 border-gold/20 border-t-gold rounded-full animate-spin" />
+        <p className="text-gray-500 font-display font-bold uppercase tracking-[0.3em] text-[10px]">
+          Initializing VentureX
+        </p>
       </div>
     );
   }
@@ -1811,24 +1929,33 @@ export default function App() {
             className={`fixed bottom-10 left-1/2 z-[400] px-8 py-4 rounded-2xl border flex items-center gap-4 ${
               useLowPowerVisuals ? '' : 'shadow-2xl'
             } ${useLiteGlass ? 'bg-luxury-black/90' : 'backdrop-blur-xl'} ${
-              adminFeedback.type === 'success' ? 'bg-green-500/10 border-green-500/20 text-green-400' :
-              adminFeedback.type === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
-              'bg-gold/10 border-gold/20 text-gold'
+              adminFeedback.type === 'success'
+                ? 'bg-green-500/10 border-green-500/20 text-green-400'
+                : adminFeedback.type === 'error'
+                  ? 'bg-red-500/10 border-red-500/20 text-red-400'
+                  : 'bg-gold/10 border-gold/20 text-gold'
             }`}
           >
-            {adminFeedback.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> :
-             adminFeedback.type === 'error' ? <AlertCircle className="w-5 h-5" /> :
-             <Sparkles className="w-5 h-5" />}
+            {adminFeedback.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5" />
+            ) : adminFeedback.type === 'error' ? (
+              <AlertCircle className="w-5 h-5" />
+            ) : (
+              <Sparkles className="w-5 h-5" />
+            )}
             <span className="text-sm font-medium">{adminFeedback.message}</span>
-            <button onClick={() => setAdminFeedback(null)} className="ml-4 opacity-50 hover:opacity-100 transition-opacity">
+            <button
+              onClick={() => setAdminFeedback(null)}
+              className="ml-4 opacity-50 hover:opacity-100 transition-opacity"
+            >
               <X className="w-4 h-4" />
             </button>
           </motion.div>
         )}
       </AnimatePresence>
-      
+
       {isUnverifiedAdmin && (
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: -50, x: '-50%' }}
           animate={{ opacity: 1, y: 0, x: '-50%' }}
           className={`fixed top-24 left-1/2 z-[100] px-6 py-3 rounded-xl border border-yellow-500/20 bg-yellow-500/10 text-yellow-400 flex items-center gap-4 max-w-[90vw] text-center ${
@@ -1838,16 +1965,18 @@ export default function App() {
           <div className="flex flex-col sm:flex-row items-center gap-3">
             <div className="flex items-center gap-2">
               <AlertCircle className="w-5 h-5" />
-              <span className="text-sm font-medium">Admin email not verified. Cloud updates blocked.</span>
+              <span className="text-sm font-medium">
+                Admin email not verified. Cloud updates blocked.
+              </span>
             </div>
             <div className="flex gap-2">
-              <button 
+              <button
                 onClick={handleResendVerification}
                 className="px-4 py-1.5 bg-yellow-500 text-luxury-black text-[10px] font-bold uppercase tracking-widest rounded-lg hover:bg-yellow-400 transition-colors"
               >
                 Resend Email
               </button>
-              <button 
+              <button
                 onClick={async () => {
                   if (auth.currentUser) {
                     await auth.currentUser.reload();
@@ -1866,29 +1995,46 @@ export default function App() {
 
       {/* Luxury Background Elements */}
       <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-        <div className={`absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-gold/5 rounded-full ${
-          useLowPowerVisuals ? 'blur-[36px]' : useBalancedVisuals ? 'blur-[72px]' : 'blur-[120px]'
-        }`} />
-        <div className={`absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gold/5 rounded-full ${
-          useLowPowerVisuals ? 'blur-[36px]' : useBalancedVisuals ? 'blur-[72px]' : 'blur-[120px]'
-        }`} />
+        <div
+          className={`absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-gold/5 rounded-full ${
+            useLowPowerVisuals ? 'blur-[36px]' : useBalancedVisuals ? 'blur-[72px]' : 'blur-[120px]'
+          }`}
+        />
+        <div
+          className={`absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gold/5 rounded-full ${
+            useLowPowerVisuals ? 'blur-[36px]' : useBalancedVisuals ? 'blur-[72px]' : 'blur-[120px]'
+          }`}
+        />
         {!useLowPowerVisuals && (
           <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-[0.03] mix-blend-overlay" />
         )}
       </div>
 
       {/* Global Navigation */}
-      <nav className={`fixed top-0 left-0 right-0 z-[100] border-b border-white/5 ${
-        useLiteGlass ? 'bg-luxury-black/95' : 'bg-luxury-black/80 backdrop-blur-xl'
-      }`}>
+      <nav
+        className={`fixed top-0 left-0 right-0 z-[100] border-b border-white/5 ${
+          useLiteGlass ? 'bg-luxury-black/95' : 'bg-luxury-black/80 backdrop-blur-xl'
+        }`}
+      >
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3 group cursor-pointer" onClick={() => { setSelectedIdea(null); setIsCreatingOpportunity(false); setSelectedCategory('All'); }}>
+          <div
+            className="flex items-center gap-3 group cursor-pointer"
+            onClick={() => {
+              setSelectedIdea(null);
+              setIsCreatingOpportunity(false);
+              setSelectedCategory('All');
+            }}
+          >
             <div className="w-10 h-10 bg-gold rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(212,175,55,0.3)] group-hover:scale-110 transition-transform duration-500">
               <TrendingUp className="w-6 h-6 text-luxury-black" />
             </div>
             <div>
-              <h1 className="text-xl font-display font-bold tracking-tighter text-white group-hover:text-gold transition-colors uppercase">VENTURE<span className="text-gold">X</span></h1>
-              <p className="text-[10px] font-display font-bold uppercase tracking-[0.3em] text-gray-500">Luxury Business Curator</p>
+              <h1 className="text-xl font-display font-bold tracking-tighter text-white group-hover:text-gold transition-colors uppercase">
+                VENTURE<span className="text-gold">X</span>
+              </h1>
+              <p className="text-[10px] font-display font-bold uppercase tracking-[0.3em] text-gray-500">
+                Luxury Business Curator
+              </p>
             </div>
           </div>
 
@@ -1897,36 +2043,45 @@ export default function App() {
               <div className="flex items-center gap-4">
                 {(isAdmin || isUnverifiedAdmin) && (
                   <div className="relative">
-                    <button 
+                    <button
                       onClick={() => setShowAdminMenu(!showAdminMenu)}
                       className="w-10 h-10 flex items-center justify-center bg-white/5 border border-white/10 text-gray-500 rounded-full hover:bg-gold/10 hover:border-gold/30 hover:text-gold transition-all"
                       title="Admin Settings"
                     >
                       <UserIcon className="w-4 h-4" />
                     </button>
-                    
+
                     <AnimatePresence>
                       {showAdminMenu && (
-                        <motion.div 
+                        <motion.div
                           initial={{ opacity: 0, scale: 0.95, y: 10 }}
                           animate={{ opacity: 1, scale: 1, y: 0 }}
                           exit={{ opacity: 0, scale: 0.95, y: 10 }}
                           className={`absolute right-0 mt-4 w-72 bg-luxury-black/95 border border-white/10 rounded-3xl p-3 z-[110] ${
-                            useLiteGlass ? '' : 'backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)]'
+                            useLiteGlass
+                              ? ''
+                              : 'backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)]'
                           }`}
                         >
                           <div className="px-4 py-2 mb-2">
-                            <p className="text-[10px] font-display font-bold uppercase tracking-[0.2em] text-gray-500">System Controls</p>
+                            <p className="text-[10px] font-display font-bold uppercase tracking-[0.2em] text-gray-500">
+                              System Controls
+                            </p>
                             <div className="mt-1 flex items-center gap-2">
-                              <div className={`w-1.5 h-1.5 rounded-full ${user?.emailVerified ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                              <div
+                                className={`w-1.5 h-1.5 rounded-full ${user?.emailVerified ? 'bg-green-500' : 'bg-yellow-500'}`}
+                              />
                               <span className="text-[9px] text-gray-400 uppercase tracking-widest">
                                 {user?.emailVerified ? 'Verified Admin' : 'Unverified Admin'}
                               </span>
                             </div>
                           </div>
 
-                          <button 
-                            onClick={() => { syncToCloud(); setShowAdminMenu(false); }}
+                          <button
+                            onClick={() => {
+                              syncToCloud();
+                              setShowAdminMenu(false);
+                            }}
                             className="w-full flex items-center gap-4 px-4 py-3 hover:bg-white/5 rounded-2xl text-left transition-all group"
                           >
                             <div className="w-8 h-8 rounded-xl bg-green-500/10 flex items-center justify-center">
@@ -1941,25 +2096,40 @@ export default function App() {
                           <div className="h-px bg-white/5 my-3" />
 
                           <div className="grid grid-cols-2 gap-2">
-                            <button 
-                              onClick={() => { downloadBackup(); setShowAdminMenu(false); }}
+                            <button
+                              onClick={() => {
+                                downloadBackup();
+                                setShowAdminMenu(false);
+                              }}
                               className="flex flex-col items-center gap-2 p-3 hover:bg-white/5 rounded-2xl transition-all"
                             >
                               <Download className="w-4 h-4 text-blue-400" />
-                              <span className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Backup</span>
+                              <span className="text-[9px] font-bold uppercase tracking-widest text-gray-400">
+                                Backup
+                              </span>
                             </button>
 
                             <label className="flex flex-col items-center gap-2 p-3 hover:bg-white/5 rounded-2xl transition-all cursor-pointer">
                               <Upload className="w-4 h-4 text-purple-400" />
-                              <span className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Restore</span>
-                              <input type="file" className="hidden" onChange={restoreFromFile} accept=".json" />
+                              <span className="text-[9px] font-bold uppercase tracking-widest text-gray-400">
+                                Restore
+                              </span>
+                              <input
+                                type="file"
+                                className="hidden"
+                                onChange={restoreFromFile}
+                                accept=".json"
+                              />
                             </label>
                           </div>
 
                           <div className="h-px bg-white/5 my-3" />
 
-                          <button 
-                            onClick={() => { setShowRevertConfirm(true); setShowAdminMenu(false); }}
+                          <button
+                            onClick={() => {
+                              setShowRevertConfirm(true);
+                              setShowAdminMenu(false);
+                            }}
                             className="w-full flex items-center justify-center gap-2 py-3 text-orange-400/60 hover:text-orange-400 transition-colors text-[10px] font-bold uppercase tracking-widest"
                           >
                             <RotateCcw className="w-3 h-3" />
@@ -1976,7 +2146,7 @@ export default function App() {
                   </span>
                   <span className="text-xs text-white font-medium">{user.email}</span>
                 </div>
-                <button 
+                <button
                   onClick={handleLogout}
                   className="p-2 hover:bg-white/10 rounded-full transition-colors text-gray-400 hover:text-white"
                   title="Logout"
@@ -1985,7 +2155,7 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              <button 
+              <button
                 onClick={() => {
                   setAuthMode('login');
                   setShowAuthModal(true);
@@ -1997,7 +2167,7 @@ export default function App() {
               </button>
             )}
             {!hasAccess && (
-              <button 
+              <button
                 onClick={() => setShowPaywall(true)}
                 className="px-6 py-2 gold-gradient text-luxury-black font-bold rounded-full text-xs uppercase tracking-widest shadow-[0_0_20px_rgba(212,175,55,0.3)] hover:scale-105 transition-all"
               >
@@ -2011,7 +2181,7 @@ export default function App() {
       {/* Auth Modal */}
       <AnimatePresence>
         {showAuthModal && (
-          <AuthModal 
+          <AuthModal
             key="auth-modal"
             mode={authMode}
             setMode={setAuthMode}
@@ -2032,45 +2202,49 @@ export default function App() {
             {!useLowPowerVisuals && (
               <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-[0.05] mix-blend-overlay" />
             )}
-            <div className={`absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-gold/10 rounded-full ${
-              useLowPowerVisuals
-                ? 'blur-[48px]'
-                : useBalancedVisuals
-                  ? 'blur-[96px]'
-                  : 'blur-[150px] animate-pulse'
-            }`} />
+            <div
+              className={`absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-gold/10 rounded-full ${
+                useLowPowerVisuals
+                  ? 'blur-[48px]'
+                  : useBalancedVisuals
+                    ? 'blur-[96px]'
+                    : 'blur-[150px] animate-pulse'
+              }`}
+            />
           </div>
 
           <div className="relative z-10 text-center max-w-5xl mx-auto">
             <motion.div
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, ease: "easeOut" }}
+              transition={{ duration: 0.8, ease: 'easeOut' }}
             >
               <div className="inline-flex items-center gap-2 px-3 py-1 bg-gold/10 border border-gold/20 rounded-full mb-8">
                 <Sparkles className="w-3 h-3 text-gold" />
-                <span className="text-[10px] font-display font-bold uppercase tracking-widest text-gold">Exclusive Access</span>
+                <span className="text-[10px] font-display font-bold uppercase tracking-widest text-gold">
+                  Exclusive Access
+                </span>
               </div>
-              
+
               <h1 className="text-5xl sm:text-7xl md:text-9xl font-serif mb-8 leading-[0.9] tracking-tight">
                 The Art of <br />
                 <span className="text-gold-gradient italic font-serif">Simple Wealth</span>
               </h1>
-              
+
               <p className="text-lg sm:text-xl text-gray-400 font-light max-w-2xl mx-auto leading-relaxed mb-12">
-                Curating high-margin, recession-proof ventures for the modern entrepreneur. 
-                Where stability meets extraordinary returns.
+                Curating high-margin, recession-proof ventures for the modern entrepreneur. Where
+                stability meets extraordinary returns.
               </p>
 
               <div className="flex flex-col sm:flex-row justify-center gap-6 mb-20">
-                <button 
+                <button
                   onClick={() => setShowPaywall(true)}
                   className="px-10 py-5 gold-gradient text-luxury-black font-display font-bold rounded-full text-lg shadow-[0_0_40px_rgba(212,175,55,0.4)] hover:scale-105 transition-all flex items-center justify-center gap-3"
                 >
                   Unlock All Blueprints
                   <ArrowRight className="w-6 h-6" />
                 </button>
-                <button 
+                <button
                   onClick={() => {
                     document.getElementById('catalog')?.scrollIntoView({ behavior: 'smooth' });
                   }}
@@ -2083,25 +2257,33 @@ export default function App() {
               {/* Market Insights Stats */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-8 max-w-4xl mx-auto pt-12 border-t border-white/5 mt-12">
                 <div className="text-center p-4 rounded-2xl bg-white/[0.02] border border-white/5">
-                  <p className="text-[10px] font-display font-bold uppercase tracking-[0.3em] text-gray-500 mb-2">Avg. Margin</p>
+                  <p className="text-[10px] font-display font-bold uppercase tracking-[0.3em] text-gray-500 mb-2">
+                    Avg. Margin
+                  </p>
                   <p className="text-3xl font-serif text-gold">65%+</p>
                 </div>
                 <div className="text-center p-4 rounded-2xl bg-white/[0.02] border border-white/5">
-                  <p className="text-[10px] font-display font-bold uppercase tracking-[0.3em] text-gray-500 mb-2">Opportunities</p>
+                  <p className="text-[10px] font-display font-bold uppercase tracking-[0.3em] text-gray-500 mb-2">
+                    Opportunities
+                  </p>
                   <p className="text-3xl font-serif text-white">250+</p>
                 </div>
                 <div className="text-center p-4 rounded-2xl bg-white/[0.02] border border-white/5">
-                  <p className="text-[10px] font-display font-bold uppercase tracking-[0.3em] text-gray-500 mb-2">Market Value</p>
+                  <p className="text-[10px] font-display font-bold uppercase tracking-[0.3em] text-gray-500 mb-2">
+                    Market Value
+                  </p>
                   <p className="text-3xl font-serif text-white">$4.2B</p>
                 </div>
                 <div className="text-center p-4 rounded-2xl bg-white/[0.02] border border-white/5">
-                  <p className="text-[10px] font-display font-bold uppercase tracking-[0.3em] text-gray-500 mb-2">Success Rate</p>
+                  <p className="text-[10px] font-display font-bold uppercase tracking-[0.3em] text-gray-500 mb-2">
+                    Success Rate
+                  </p>
                   <p className="text-3xl font-serif text-gold">82%</p>
                 </div>
               </div>
             </motion.div>
           </div>
-          
+
           {/* Animated Background Text */}
           <div className="absolute top-1/2 right-[-10%] translate-y-[-50%] opacity-[0.02] pointer-events-none select-none hidden lg:block">
             <h3 className="text-[30rem] font-serif italic leading-none">Wealth</h3>
@@ -2118,30 +2300,37 @@ export default function App() {
             {!useLowPowerVisuals && (
               <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-[0.05] mix-blend-overlay" />
             )}
-            <div className={`absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-gold/10 rounded-full ${
-              useLowPowerVisuals
-                ? 'blur-[48px]'
-                : useBalancedVisuals
-                  ? 'blur-[96px]'
-                  : 'blur-[150px] animate-pulse'
-            }`} />
+            <div
+              className={`absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-gold/10 rounded-full ${
+                useLowPowerVisuals
+                  ? 'blur-[48px]'
+                  : useBalancedVisuals
+                    ? 'blur-[96px]'
+                    : 'blur-[150px] animate-pulse'
+              }`}
+            />
           </div>
 
           <div className="relative z-10 mx-auto w-full max-w-5xl text-center">
             <motion.div
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, ease: "easeOut" }}
+              transition={{ duration: 0.8, ease: 'easeOut' }}
             >
               <div className="inline-flex items-center gap-2 px-3 py-1 bg-gold/10 border border-gold/20 rounded-full mb-8">
                 <Sparkles className="w-3 h-3 text-gold" />
-                <span className="text-[10px] font-display font-bold uppercase tracking-widest text-gold">Premium Member</span>
+                <span className="text-[10px] font-display font-bold uppercase tracking-widest text-gold">
+                  Premium Member
+                </span>
               </div>
 
               <h1 className="text-5xl sm:text-7xl md:text-9xl font-serif mb-8 leading-[0.9] tracking-tight">
-                Venture<span className="text-gold-gradient not-italic font-display font-bold">Catalog</span>
+                Venture
+                <span className="text-gold-gradient not-italic font-display font-bold">
+                  Catalog
+                </span>
               </h1>
-              
+
               <p className="text-lg sm:text-xl text-gray-400 font-light max-w-2xl mx-auto leading-relaxed mb-12">
                 Your exclusive collection of high-margin, low-overhead business opportunities.
               </p>
@@ -2150,19 +2339,21 @@ export default function App() {
                 {!useLowPowerVisuals && (
                   <div className="absolute -inset-1 bg-gold/20 rounded-full blur-xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-500" />
                 )}
-                <div className={`relative flex items-center bg-white/5 border border-white/10 rounded-full p-2 focus-within:border-gold/50 transition-all ${
-                  useLiteGlass ? '' : 'backdrop-blur-xl'
-                }`}>
+                <div
+                  className={`relative flex items-center bg-white/5 border border-white/10 rounded-full p-2 focus-within:border-gold/50 transition-all ${
+                    useLiteGlass ? '' : 'backdrop-blur-xl'
+                  }`}
+                >
                   <Search className="w-6 h-6 text-gray-500 ml-6" />
-                  <input 
-                    type="text" 
-                    placeholder="Search by industry, cost, or keyword..." 
+                  <input
+                    type="text"
+                    placeholder="Search by industry, cost, or keyword..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="flex-grow bg-transparent border-none px-6 py-4 text-white placeholder-gray-500 focus:outline-none text-lg"
                   />
                   {searchQuery && (
-                    <button 
+                    <button
                       onClick={() => setSearchQuery('')}
                       className="p-2 hover:bg-white/10 rounded-full transition-colors mr-2"
                     >
@@ -2173,13 +2364,13 @@ export default function App() {
               </div>
 
               <div className="flex flex-wrap justify-center gap-3">
-                {QUICK_TAGS.map(tag => (
+                {QUICK_TAGS.map((tag) => (
                   <button
                     key={tag.label}
                     onClick={() => setActiveTag(activeTag === tag.query ? null : tag.query)}
                     className={`px-6 py-3 rounded-full text-[10px] font-display font-bold uppercase tracking-[0.2em] border transition-all duration-500 ${
-                      activeTag === tag.query 
-                        ? 'bg-gold border-gold text-luxury-black shadow-[0_0_20px_rgba(212,175,55,0.3)]' 
+                      activeTag === tag.query
+                        ? 'bg-gold border-gold text-luxury-black shadow-[0_0_20px_rgba(212,175,55,0.3)]'
                         : 'bg-white/5 border-white/10 text-gray-500 hover:border-white/30 hover:text-white'
                     }`}
                   >
@@ -2193,16 +2384,19 @@ export default function App() {
       )}
 
       {/* Search above category tabs (centered); tab strip scrolls horizontally without visible scrollbar */}
-      <section id="catalog" className={`sticky top-0 z-40 overflow-x-hidden border-b border-white/5 py-8 ${
-        useLiteGlass ? 'bg-luxury-black/95' : 'bg-luxury-black/80 backdrop-blur-xl'
-      }`}>
+      <section
+        id="catalog"
+        className={`sticky top-0 z-40 overflow-x-hidden border-b border-white/5 py-8 ${
+          useLiteGlass ? 'bg-luxury-black/95' : 'bg-luxury-black/80 backdrop-blur-xl'
+        }`}
+      >
         <div className="mx-auto flex min-w-0 max-w-7xl flex-col items-stretch gap-6 px-6 lg:gap-8">
-          <form 
+          <form
             onSubmit={(e) => e.preventDefault()}
             className="group relative mx-auto w-full max-w-2xl shrink-0"
           >
             <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-500 w-4 h-4 pointer-events-none group-focus-within:text-gold transition-colors" />
-            <input 
+            <input
               type="text"
               placeholder="Search the collection..."
               value={searchQuery}
@@ -2219,26 +2413,26 @@ export default function App() {
               </button>
             )}
           </form>
-          
+
           <div className="flex min-w-0 w-full flex-col gap-4 sm:flex-row sm:items-center sm:gap-3">
             <div className="no-scrollbar min-w-0 flex-1 overflow-x-auto overscroll-x-contain py-1">
               <div className="flex w-max items-center gap-2 pr-1">
-              {CATEGORIES.map(category => (
-                <button
-                  key={category}
-                  onClick={() => setSelectedCategory(category)}
-                  className={`shrink-0 px-6 py-3 rounded-full text-[10px] font-display font-bold uppercase tracking-[0.2em] whitespace-nowrap transition-all duration-500 ${
-                    selectedCategory === category 
-                      ? 'bg-gold text-luxury-black shadow-[0_0_20px_rgba(212,175,55,0.3)]' 
-                      : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'
-                  }`}
-                >
-                  {category}
-                </button>
-              ))}
+                {CATEGORIES.map((category) => (
+                  <button
+                    key={category}
+                    onClick={() => setSelectedCategory(category)}
+                    className={`shrink-0 px-6 py-3 rounded-full text-[10px] font-display font-bold uppercase tracking-[0.2em] whitespace-nowrap transition-all duration-500 ${
+                      selectedCategory === category
+                        ? 'bg-gold text-luxury-black shadow-[0_0_20px_rgba(212,175,55,0.3)]'
+                        : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    {category}
+                  </button>
+                ))}
               </div>
             </div>
-            
+
             <div className="flex shrink-0 flex-wrap items-center gap-3 sm:justify-end">
               {selectedCategory === 'Shortlisted' && favorites.length > 1 && (
                 <button
@@ -2251,7 +2445,7 @@ export default function App() {
               )}
 
               {(isAdmin || isUnverifiedAdmin) && hasDuplicates && (
-                <button 
+                <button
                   onClick={() => setShowDeduplicateConfirm(true)}
                   className="flex items-center gap-2 px-6 py-3 bg-gold/10 border border-gold/20 text-gold rounded-full hover:bg-gold/20 transition-all text-[10px] font-display font-bold uppercase tracking-widest"
                   title="Remove Duplicates"
@@ -2288,9 +2482,11 @@ export default function App() {
       {/* Revert Confirmation Modal */}
       <AnimatePresence>
         {showRevertConfirm && (
-          <div className={`fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 ${
-            useLiteGlass ? '' : 'backdrop-blur-md'
-          }`}>
+          <div
+            className={`fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 ${
+              useLiteGlass ? '' : 'backdrop-blur-md'
+            }`}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -2302,7 +2498,8 @@ export default function App() {
               </div>
               <h3 className="text-2xl font-bold text-white mb-2">Revert to Cloud?</h3>
               <p className="text-gray-400 mb-8">
-                This will discard all your local changes and pull the latest data from the cloud. This action cannot be undone.
+                This will discard all your local changes and pull the latest data from the cloud.
+                This action cannot be undone.
               </p>
               <div className="flex flex-col gap-3">
                 <button
@@ -2324,9 +2521,11 @@ export default function App() {
       </AnimatePresence>
       <AnimatePresence>
         {showResetConfirm && (
-          <div className={`fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 ${
-            useLiteGlass ? '' : 'backdrop-blur-sm'
-          }`}>
+          <div
+            className={`fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 ${
+              useLiteGlass ? '' : 'backdrop-blur-sm'
+            }`}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -2335,7 +2534,8 @@ export default function App() {
             >
               <h3 className="text-xl font-bold text-white mb-2">Reset All Ideas?</h3>
               <p className="text-gray-400 mb-6">
-                This will delete all your custom business ideas, edits, and uploaded pictures. This action cannot be undone.
+                This will delete all your custom business ideas, edits, and uploaded pictures. This
+                action cannot be undone.
               </p>
               <div className="flex gap-3">
                 <button
@@ -2359,9 +2559,11 @@ export default function App() {
       {/* Deduplicate Confirmation Modal */}
       <AnimatePresence>
         {showDeduplicateConfirm && (
-          <div className={`fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 ${
-            useLiteGlass ? '' : 'backdrop-blur-md'
-          }`}>
+          <div
+            className={`fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 ${
+              useLiteGlass ? '' : 'backdrop-blur-md'
+            }`}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -2373,7 +2575,8 @@ export default function App() {
               </div>
               <h3 className="text-2xl font-bold text-white mb-2">Clean Up Duplicates?</h3>
               <p className="text-gray-400 mb-8">
-                I've found some duplicate business ideas. I can automatically merge them for you, keeping the versions with your custom pictures and edits.
+                I've found some duplicate business ideas. I can automatically merge them for you,
+                keeping the versions with your custom pictures and edits.
               </p>
               <div className="flex flex-col gap-3">
                 <button
@@ -2395,9 +2598,11 @@ export default function App() {
       </AnimatePresence>
       <AnimatePresence>
         {showDeleteConfirm && (
-          <div className={`fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 ${
-            useLiteGlass ? '' : 'backdrop-blur-md'
-          }`}>
+          <div
+            className={`fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 ${
+              useLiteGlass ? '' : 'backdrop-blur-md'
+            }`}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -2409,7 +2614,11 @@ export default function App() {
               </div>
               <h3 className="text-2xl font-bold text-white mb-2">Delete Opportunity?</h3>
               <p className="text-gray-400 mb-8">
-                Are you sure you want to remove "<span className="text-white font-medium">{(pendingDeleteIdea ?? selectedIdea)?.title}</span>"? This action cannot be undone.
+                Are you sure you want to remove "
+                <span className="text-white font-medium">
+                  {(pendingDeleteIdea ?? selectedIdea)?.title}
+                </span>
+                "? This action cannot be undone.
               </p>
               <div className="flex flex-col gap-3">
                 <button
@@ -2439,9 +2648,11 @@ export default function App() {
           <div className="mb-16 p-8 bg-gold/10 border border-gold/20 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-8 backdrop-blur-xl">
             <div>
               <h3 className="text-2xl font-serif text-white mb-2">Exclusive Sample Access</h3>
-              <p className="text-sm text-gray-400 font-light">You are viewing a curated selection of our premium business blueprints.</p>
+              <p className="text-sm text-gray-400 font-light">
+                You are viewing a curated selection of our premium business blueprints.
+              </p>
             </div>
-            <button 
+            <button
               onClick={() => setShowPaywall(true)}
               className="px-10 py-4 gold-gradient text-luxury-black font-display font-bold rounded-full hover:scale-105 transition-all shadow-[0_0_20px_rgba(212,175,55,0.3)] uppercase tracking-widest text-xs"
             >
@@ -2452,8 +2663,10 @@ export default function App() {
 
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-32 gap-6">
-            <div className="w-16 h-16 border-2 border-gold/20 border-t-gold rounded-full animate-spin" />
-            <p className="text-gray-500 font-display font-bold uppercase tracking-[0.3em] text-[10px]">Curating Collection</p>
+            <LoadingSpinner className="w-16 h-16 border-2 border-gold/20 border-t-gold rounded-full animate-spin" />
+            <p className="text-gray-500 font-display font-bold uppercase tracking-[0.3em] text-[10px]">
+              Curating Collection
+            </p>
           </div>
         ) : filteredIdeas.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-32 text-center">
@@ -2462,9 +2675,10 @@ export default function App() {
             </div>
             <h3 className="text-3xl font-serif text-white mb-4">No Matches Found</h3>
             <p className="text-gray-400 max-w-md mx-auto font-light leading-relaxed mb-10">
-              We couldn't find any blueprints matching your current search. Try adjusting your filters or search terms.
+              We couldn't find any blueprints matching your current search. Try adjusting your
+              filters or search terms.
             </p>
-            <button 
+            <button
               onClick={() => {
                 setSearchQuery('');
                 setSelectedCategory('All');
@@ -2496,21 +2710,27 @@ export default function App() {
                   }}
                   className="group cursor-pointer"
                 >
-                  <div className={`luxury-card overflow-hidden h-full flex flex-col ${
-                    useLowPowerVisuals ? 'shadow-none' : ''
-                  }`}>
+                  <div
+                    className={`luxury-card overflow-hidden h-full flex flex-col ${
+                      useLowPowerVisuals ? 'shadow-none' : ''
+                    }`}
+                  >
                     <div className="p-8 relative">
                       <div className="flex flex-col gap-2 mb-4">
                         <div className="flex gap-2">
-                          <span className={`bg-luxury-black/60 text-gold text-[9px] font-display font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full border border-white/10 ${
-                            useLiteGlass ? '' : 'backdrop-blur-xl'
-                          }`}>
+                          <span
+                            className={`bg-luxury-black/60 text-gold text-[9px] font-display font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full border border-white/10 ${
+                              useLiteGlass ? '' : 'backdrop-blur-xl'
+                            }`}
+                          >
                             {idea.category}
                           </span>
                           {favorites.includes(idea.id) && (
-                            <span className={`bg-gold/20 text-gold text-[9px] font-display font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full border border-gold/40 flex items-center gap-1 ${
-                              useLiteGlass ? '' : 'backdrop-blur-xl'
-                            }`}>
+                            <span
+                              className={`bg-gold/20 text-gold text-[9px] font-display font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full border border-gold/40 flex items-center gap-1 ${
+                                useLiteGlass ? '' : 'backdrop-blur-xl'
+                              }`}
+                            >
                               <Heart className="w-2.5 h-2.5 fill-current" />
                               Shortlisted
                             </span>
@@ -2524,7 +2744,7 @@ export default function App() {
                         </div>
                       </div>
 
-                      <button 
+                      <button
                         type="button"
                         onClick={(e) => toggleFavorite(idea.id, e)}
                         className={`absolute top-6 right-6 p-3 rounded-full border transition-all duration-500 ${
@@ -2535,12 +2755,14 @@ export default function App() {
                             : 'bg-luxury-black/40 border-white/10 text-white hover:bg-gold/20 hover:border-gold/50'
                         }`}
                       >
-                        <Heart className={`w-4 h-4 transition-all ${favorites.includes(idea.id) ? 'fill-current' : ''}`} />
+                        <Heart
+                          className={`w-4 h-4 transition-all ${favorites.includes(idea.id) ? 'fill-current' : ''}`}
+                        />
                       </button>
 
                       {(isAdmin || isUnverifiedAdmin) && (
                         <div className="absolute top-6 right-20 flex gap-2">
-                          <button 
+                          <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
@@ -2553,7 +2775,7 @@ export default function App() {
                           >
                             <Pencil className="w-4 h-4" />
                           </button>
-                          <button 
+                          <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
@@ -2568,7 +2790,7 @@ export default function App() {
                         </div>
                       )}
                     </div>
-                    
+
                     <div className="p-10 flex-grow flex flex-col">
                       <h3 className="text-3xl font-serif mb-4 group-hover:text-gold transition-colors leading-tight">
                         {idea.title}
@@ -2576,14 +2798,20 @@ export default function App() {
                       <p className="text-gray-400 text-sm line-clamp-3 mb-10 font-light leading-relaxed">
                         {idea.description}
                       </p>
-                      
+
                       <div className="mt-auto pt-8 border-t border-white/5 flex items-end justify-between gap-4">
                         <div className="min-w-0 flex flex-col">
-                          <span className="text-[9px] font-display font-bold uppercase tracking-[0.2em] text-gray-500 mb-1">Valuation Potential</span>
-                          <span className="text-lg font-display font-bold text-white tracking-tight">{idea.potentialIncome}</span>
+                          <span className="text-[9px] font-display font-bold uppercase tracking-[0.2em] text-gray-500 mb-1">
+                            Valuation Potential
+                          </span>
+                          <span className="text-lg font-display font-bold text-white tracking-tight">
+                            {idea.potentialIncome}
+                          </span>
                         </div>
                         <div className="flex shrink-0 translate-x-1 -translate-y-1 sm:translate-x-2 sm:-translate-y-0.5 items-center gap-3.5 text-gold group/btn">
-                          <span className="text-[11px] font-display font-bold uppercase tracking-[0.2em]">Explore</span>
+                          <span className="text-[11px] font-display font-bold uppercase tracking-[0.2em]">
+                            Explore
+                          </span>
                           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-gold/30 transition-all duration-500 group-hover/btn:bg-gold group-hover/btn:text-luxury-black">
                             <ArrowRight className="h-5 w-5" />
                           </div>
@@ -2595,7 +2823,7 @@ export default function App() {
               ))}
 
               {!hasAccess && filteredIdeas.length >= 10 && (
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   onClick={() => setShowPaywall(true)}
@@ -2605,7 +2833,10 @@ export default function App() {
                     <Plus className="w-10 h-10 text-gold" />
                   </div>
                   <h3 className="text-3xl font-serif text-white mb-4">Unlock 300+ More</h3>
-                  <p className="text-gray-500 text-sm font-light mb-10 leading-relaxed">Get instant access to our entire library of high-margin local business blueprints.</p>
+                  <p className="text-gray-500 text-sm font-light mb-10 leading-relaxed">
+                    Get instant access to our entire library of high-margin local business
+                    blueprints.
+                  </p>
                   <button className="px-10 py-4 gold-gradient text-luxury-black font-display font-bold rounded-full uppercase tracking-widest text-xs shadow-[0_0_20px_rgba(212,175,55,0.3)]">
                     Upgrade to Premium
                   </button>
@@ -2634,7 +2865,7 @@ export default function App() {
             className="flex items-center gap-4 px-10 py-5 bg-white/[0.03] border border-white/10 rounded-full hover:bg-white/[0.06] transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isGenerating ? (
-              <div className="w-5 h-5 border-2 border-gold/20 border-t-gold rounded-full animate-spin" />
+              <LoadingSpinner className="w-5 h-5 border-2 border-gold/20 border-t-gold rounded-full animate-spin" />
             ) : (
               <Plus className="w-5 h-5 text-gold group-hover:rotate-90 transition-transform duration-500" />
             )}
@@ -2646,7 +2877,9 @@ export default function App() {
 
         {filteredIdeas.length === 0 && !isGenerating && (
           <div className="text-center py-20">
-            <p className="text-gray-500 font-light italic mb-4">No opportunities found matching your keywords.</p>
+            <p className="text-gray-500 font-light italic mb-4">
+              No opportunities found matching your keywords.
+            </p>
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
@@ -2662,7 +2895,7 @@ export default function App() {
       {/* Detail Modal */}
       <AnimatePresence>
         {selectedIdea && (
-          <motion.div 
+          <motion.div
             key="detail-modal-overlay"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -2679,7 +2912,7 @@ export default function App() {
               }}
               className={`absolute inset-0 bg-luxury-black/90 ${useLiteGlass ? '' : 'backdrop-blur-sm'}`}
             />
-            
+
             <motion.div
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -2688,7 +2921,7 @@ export default function App() {
             >
               <div className="absolute top-4 right-4 z-10 flex gap-2">
                 {(isAdmin || isUnverifiedAdmin) && !showExecutionPlan && (
-                  <button 
+                  <button
                     onClick={() => setIsEditing(!isEditing)}
                     className="p-2 bg-luxury-black/50 rounded-full hover:bg-luxury-black transition-colors text-gold"
                     title="Edit Idea"
@@ -2696,7 +2929,7 @@ export default function App() {
                     <Pencil className="w-5 h-5" />
                   </button>
                 )}
-                <button 
+                <button
                   onClick={() => {
                     setSelectedIdea(null);
                     setIsCreatingOpportunity(false);
@@ -2723,7 +2956,7 @@ export default function App() {
                         <h2 className="text-4xl font-serif text-gold">
                           {isCreatingOpportunity ? 'Add New Opportunity' : 'Edit Opportunity'}
                         </h2>
-                        <button 
+                        <button
                           onClick={() => setIsEditing(false)}
                           className="p-3 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 transition-all text-gray-500 hover:text-white"
                         >
@@ -2734,44 +2967,62 @@ export default function App() {
                       <div className="space-y-10">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                           <div className="space-y-2">
-                            <label className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-gray-500">Opportunity Title</label>
-                            <input 
+                            <label className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-gray-500">
+                              Opportunity Title
+                            </label>
+                            <input
                               type="text"
                               value={editForm.title || ''}
-                              onChange={(e) => setEditForm(prev => ({ ...prev, title: e.target.value }))}
+                              onChange={(e) =>
+                                setEditForm((prev) => ({ ...prev, title: e.target.value }))
+                              }
                               className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-4 px-6 focus:outline-none focus:border-gold/30 focus:bg-white/[0.06] transition-all text-sm font-display tracking-wide"
                             />
                           </div>
 
                           <div className="space-y-2">
-                            <label className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-gray-500">Category</label>
-                            <select 
+                            <label className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-gray-500">
+                              Category
+                            </label>
+                            <select
                               value={editForm.category || ''}
-                              onChange={(e) => setEditForm(prev => ({ ...prev, category: e.target.value }))}
+                              onChange={(e) =>
+                                setEditForm((prev) => ({ ...prev, category: e.target.value }))
+                              }
                               className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-4 px-6 focus:outline-none focus:border-gold/30 focus:bg-white/[0.06] transition-all text-sm font-display tracking-wide appearance-none"
                             >
-                              {CATEGORIES.filter(c => c !== 'All').map(c => (
-                                <option key={c} value={c} className="bg-luxury-black">{c}</option>
+                              {CATEGORIES.filter((c) => c !== 'All').map((c) => (
+                                <option key={c} value={c} className="bg-luxury-black">
+                                  {c}
+                                </option>
                               ))}
                             </select>
                           </div>
                         </div>
 
                         <div className="space-y-2">
-                          <label className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-gray-500">Valuation Potential</label>
-                          <input 
+                          <label className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-gray-500">
+                            Valuation Potential
+                          </label>
+                          <input
                             type="text"
                             value={editForm.potentialIncome || ''}
-                            onChange={(e) => setEditForm(prev => ({ ...prev, potentialIncome: e.target.value }))}
+                            onChange={(e) =>
+                              setEditForm((prev) => ({ ...prev, potentialIncome: e.target.value }))
+                            }
                             className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-4 px-6 focus:outline-none focus:border-gold/30 focus:bg-white/[0.06] transition-all text-sm font-display tracking-wide"
                           />
                         </div>
 
                         <div className="space-y-2">
-                          <label className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-gray-500">Description</label>
-                          <textarea 
+                          <label className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-gray-500">
+                            Description
+                          </label>
+                          <textarea
                             value={editForm.description || ''}
-                            onChange={(e) => setEditForm(prev => ({ ...prev, description: e.target.value }))}
+                            onChange={(e) =>
+                              setEditForm((prev) => ({ ...prev, description: e.target.value }))
+                            }
                             rows={5}
                             className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-4 px-6 focus:outline-none focus:border-gold/30 focus:bg-white/[0.06] transition-all text-sm font-light leading-relaxed resize-none"
                           />
@@ -2779,27 +3030,27 @@ export default function App() {
 
                         <div className="flex flex-col gap-6 pt-8">
                           <div className="flex gap-4">
-                            <button 
+                            <button
                               onClick={handleSaveEdit}
                               className="flex-grow gold-gradient text-luxury-black font-display font-bold py-5 rounded-full hover:scale-[1.02] transition-all shadow-[0_0_20px_rgba(212,175,55,0.3)] uppercase tracking-widest text-xs"
                             >
                               {isCreatingOpportunity ? 'Add to collection' : 'Save collection item'}
                             </button>
-                            <button 
+                            <button
                               onClick={() => setIsEditing(false)}
                               className="px-10 py-5 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 transition-all font-display font-bold uppercase tracking-widest text-xs text-gray-400"
                             >
                               Cancel
                             </button>
                           </div>
-                          
+
                           {!isCreatingOpportunity && (
-                          <button 
-                            onClick={() => setShowDeleteConfirm(true)}
-                            className="w-full py-4 text-red-500/40 hover:text-red-500 text-[10px] font-display font-bold uppercase tracking-[0.3em] transition-colors"
-                          >
-                            Remove from Collection
-                          </button>
+                            <button
+                              onClick={() => setShowDeleteConfirm(true)}
+                              className="w-full py-4 text-red-500/40 hover:text-red-500 text-[10px] font-display font-bold uppercase tracking-[0.3em] transition-colors"
+                            >
+                              Remove from Collection
+                            </button>
                           )}
                         </div>
 
@@ -2813,7 +3064,7 @@ export default function App() {
                     </div>
                   </motion.div>
                 ) : !showExecutionPlan ? (
-                  <motion.div 
+                  <motion.div
                     key="details"
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
@@ -2829,59 +3080,72 @@ export default function App() {
                           <div className="h-px w-8 bg-gold/30 mt-2" />
                         </div>
                         <div className="flex gap-1 bg-white/[0.03] p-1 rounded-xl border border-white/10 w-fit">
-                          {(['overview', 'calculator', 'roadmap', 'resources'] as const).map((tab) => (
-                            <button
-                              key={tab}
-                              onClick={() => {
-                                if (!hasAccess && tab !== 'overview') {
-                                  setShowPaywall(true);
-                                } else {
-                                  setActiveTab(tab);
-                                }
-                              }}
-                              className={`px-4 py-2 text-[9px] font-display font-bold uppercase tracking-widest rounded-lg transition-all relative ${
-                                activeTab === tab 
-                                  ? 'bg-gold text-luxury-black shadow-lg' 
-                                  : 'text-gray-500 hover:text-gray-300'
-                              }`}
-                            >
-                              {tab}
-                              {!hasAccess && tab !== 'overview' && (
-                                <div className="absolute -top-1 -right-1">
-                                  <div className="w-2 h-2 bg-gold rounded-full animate-ping" />
-                                  <div className="w-2 h-2 bg-gold rounded-full absolute top-0" />
-                                </div>
-                              )}
-                            </button>
-                          ))}
+                          {(['overview', 'calculator', 'roadmap', 'resources'] as const).map(
+                            (tab) => (
+                              <button
+                                key={tab}
+                                onClick={() => {
+                                  if (!hasAccess && tab !== 'overview') {
+                                    setShowPaywall(true);
+                                  } else {
+                                    setActiveTab(tab);
+                                  }
+                                }}
+                                className={`px-4 py-2 text-[9px] font-display font-bold uppercase tracking-widest rounded-lg transition-all relative ${
+                                  activeTab === tab
+                                    ? 'bg-gold text-luxury-black shadow-lg'
+                                    : 'text-gray-500 hover:text-gray-300'
+                                }`}
+                              >
+                                {tab}
+                                {!hasAccess && tab !== 'overview' && (
+                                  <div className="absolute -top-1 -right-1">
+                                    <div className="w-2 h-2 bg-gold rounded-full animate-ping" />
+                                    <div className="w-2 h-2 bg-gold rounded-full absolute top-0" />
+                                  </div>
+                                )}
+                              </button>
+                            )
+                          )}
                         </div>
                       </div>
-                      
-                  <div className="flex-grow flex flex-col">
-                    <div className="mb-10">
-                      <h2 className="text-4xl md:text-5xl font-serif mb-4 leading-tight tracking-tight">{selectedIdea.title}</h2>
-                      <p className="text-gray-400 font-light leading-relaxed text-lg max-w-3xl">
-                        {selectedIdea.description}
-                      </p>
-                    </div>
 
-                    <AnimatePresence mode="wait">
-                      {activeTab === 'overview' && (
-                        <motion.div
-                          key="overview"
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -10 }}
-                          className="space-y-12"
-                        >
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
+                      <div className="flex-grow flex flex-col">
+                        <div className="mb-10">
+                          <h2 className="text-4xl md:text-5xl font-serif mb-4 leading-tight tracking-tight">
+                            {selectedIdea.title}
+                          </h2>
+                          <p className="text-gray-400 font-light leading-relaxed text-lg max-w-3xl">
+                            {selectedIdea.description}
+                          </p>
+                        </div>
+
+                        <AnimatePresence mode="wait">
+                          {activeTab === 'overview' && (
+                            <motion.div
+                              key="overview"
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -10 }}
+                              className="space-y-12"
+                            >
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
                                 <div className="p-8 bg-white/[0.02] rounded-3xl border border-white/5 group hover:border-gold/20 transition-colors">
-                                  <h4 className="text-[9px] font-display font-bold text-gray-500 uppercase tracking-[0.2em] mb-2">Startup Capital</h4>
-                                  <p className="text-2xl text-white font-serif tracking-tight">${selectedIdea.startupCost.min.toLocaleString()} - ${selectedIdea.startupCost.max.toLocaleString()}</p>
+                                  <h4 className="text-[9px] font-display font-bold text-gray-500 uppercase tracking-[0.2em] mb-2">
+                                    Startup Capital
+                                  </h4>
+                                  <p className="text-2xl text-white font-serif tracking-tight">
+                                    ${selectedIdea.startupCost.min.toLocaleString()} - $
+                                    {selectedIdea.startupCost.max.toLocaleString()}
+                                  </p>
                                 </div>
                                 <div className="p-8 bg-white/[0.02] rounded-3xl border border-white/5 group hover:border-gold/20 transition-colors">
-                                  <h4 className="text-[9px] font-display font-bold text-gray-500 uppercase tracking-[0.2em] mb-2">Valuation Potential</h4>
-                                  <p className="text-2xl text-gold font-serif tracking-tight">{selectedIdea.potentialIncome}</p>
+                                  <h4 className="text-[9px] font-display font-bold text-gray-500 uppercase tracking-[0.2em] mb-2">
+                                    Valuation Potential
+                                  </h4>
+                                  <p className="text-2xl text-gold font-serif tracking-tight">
+                                    {selectedIdea.potentialIncome}
+                                  </p>
                                 </div>
                               </div>
 
@@ -2895,7 +3159,10 @@ export default function App() {
                                   Curator's Note
                                 </h4>
                                 <p className="text-gray-300 italic font-serif text-xl leading-relaxed relative z-10">
-                                  "This venture represents the pinnacle of 'simple' but high-yield opportunities. Its low competition and essential nature make it a cornerstone for any diversified portfolio. Focus on operational excellence to truly unlock its potential."
+                                  "This venture represents the pinnacle of 'simple' but high-yield
+                                  opportunities. Its low competition and essential nature make it a
+                                  cornerstone for any diversified portfolio. Focus on operational
+                                  excellence to truly unlock its potential."
                                 </p>
                               </div>
 
@@ -2921,11 +3188,20 @@ export default function App() {
                                   {[
                                     { label: 'Demand', value: 'High', color: 'text-green-400' },
                                     { label: 'Competition', value: 'Low', color: 'text-blue-400' },
-                                    { label: 'Scalability', value: '9.8/10', color: 'text-gold' }
+                                    { label: 'Scalability', value: '9.8/10', color: 'text-gold' },
                                   ].map((stat, i) => (
-                                    <div key={i} className="p-6 bg-white/[0.02] rounded-2xl border border-white/5 text-center">
-                                      <p className="text-[8px] font-display font-bold text-gray-600 uppercase tracking-widest mb-2">{stat.label}</p>
-                                      <p className={`text-sm font-display font-bold uppercase tracking-widest ${stat.color}`}>{stat.value}</p>
+                                    <div
+                                      key={i}
+                                      className="p-6 bg-white/[0.02] rounded-2xl border border-white/5 text-center"
+                                    >
+                                      <p className="text-[8px] font-display font-bold text-gray-600 uppercase tracking-widest mb-2">
+                                        {stat.label}
+                                      </p>
+                                      <p
+                                        className={`text-sm font-display font-bold uppercase tracking-widest ${stat.color}`}
+                                      >
+                                        {stat.value}
+                                      </p>
                                     </div>
                                   ))}
                                 </div>
@@ -2937,9 +3213,14 @@ export default function App() {
                                   <AlertCircle className="w-5 h-5 text-gold" />
                                 </div>
                                 <div>
-                                  <h4 className="text-[10px] font-display font-bold text-white uppercase tracking-widest mb-2">Due Diligence Required</h4>
+                                  <h4 className="text-[10px] font-display font-bold text-white uppercase tracking-widest mb-2">
+                                    Due Diligence Required
+                                  </h4>
                                   <p className="text-xs text-gray-500 leading-relaxed">
-                                    Business regulations vary significantly by jurisdiction. You are responsible for conducting your own research to determine which local permits, licenses, or certifications are required for this specific opportunity in your area.
+                                    Business regulations vary significantly by jurisdiction. You are
+                                    responsible for conducting your own research to determine which
+                                    local permits, licenses, or certifications are required for this
+                                    specific opportunity in your area.
                                   </p>
                                 </div>
                               </div>
@@ -2951,11 +3232,15 @@ export default function App() {
                                 </h4>
                                 <div className="bg-white/[0.02] border border-white/5 p-8 rounded-3xl relative overflow-hidden">
                                   {!hasAccess && (
-                                    <div className={`absolute inset-0 bg-luxury-black/80 z-10 flex flex-col items-center justify-center p-8 text-center ${
-                                      useLiteGlass ? '' : 'backdrop-blur-md'
-                                    }`}>
-                                      <p className="text-xs text-gray-400 mb-4 font-light">Unlock proprietary AI naming engine</p>
-                                      <button 
+                                    <div
+                                      className={`absolute inset-0 bg-luxury-black/80 z-10 flex flex-col items-center justify-center p-8 text-center ${
+                                        useLiteGlass ? '' : 'backdrop-blur-md'
+                                      }`}
+                                    >
+                                      <p className="text-xs text-gray-400 mb-4 font-light">
+                                        Unlock proprietary AI naming engine
+                                      </p>
+                                      <button
                                         onClick={() => setShowPaywall(true)}
                                         className="text-[10px] font-display font-bold bg-gold text-luxury-black px-6 py-3 rounded-full hover:scale-105 transition-all uppercase tracking-widest"
                                       >
@@ -2963,12 +3248,17 @@ export default function App() {
                                       </button>
                                     </div>
                                   )}
-                                  {generatedNames[selectedIdea.id] ? (
+                                  {(generatedNames[selectedIdea.id]?.length ?? 0) > 0 ? (
                                     <div className="flex flex-wrap gap-3">
-                                      {generatedNames[selectedIdea.id].map((name, i) => (
-                                        <span key={i} className="px-5 py-2 bg-gold/10 text-gold text-[10px] font-display font-bold uppercase tracking-widest rounded-full border border-gold/20">{name}</span>
+                                      {(generatedNames[selectedIdea.id] ?? []).map((name, i) => (
+                                        <span
+                                          key={i}
+                                          className="px-5 py-2 bg-gold/10 text-gold text-[10px] font-display font-bold uppercase tracking-widest rounded-full border border-gold/20"
+                                        >
+                                          {name}
+                                        </span>
                                       ))}
-                                      <button 
+                                      <button
                                         onClick={() => generateNames(selectedIdea)}
                                         className="text-[10px] font-display font-bold text-gray-600 hover:text-gold transition-colors ml-4 uppercase tracking-widest"
                                       >
@@ -2976,20 +3266,26 @@ export default function App() {
                                       </button>
                                     </div>
                                   ) : (
-                                    <button 
+                                    <button
                                       onClick={() => generateNames(selectedIdea)}
                                       disabled={isNaming}
                                       className="w-full py-5 bg-gold/5 text-gold text-[10px] font-display font-bold uppercase tracking-[0.2em] rounded-2xl border border-gold/10 hover:bg-gold/10 transition-all flex items-center justify-center gap-3"
                                     >
-                                      {isNaming ? <div className="w-4 h-4 border-2 border-gold/20 border-t-gold rounded-full animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                                      {isNaming ? 'Generating Concepts...' : 'Generate AI Brand Names'}
+                                      {isNaming ? (
+                                        <LoadingSpinner className="w-4 h-4 border-2 border-gold/20 border-t-gold rounded-full animate-spin" />
+                                      ) : (
+                                        <Sparkles className="w-4 h-4" />
+                                      )}
+                                      {isNaming
+                                        ? 'Generating Concepts...'
+                                        : 'Generate AI Brand Names'}
                                     </button>
                                   )}
                                 </div>
                               </div>
 
                               <div className="flex gap-6 pt-8">
-                                <button 
+                                <button
                                   onClick={() => {
                                     if (!hasAccess) {
                                       setShowPaywall(true);
@@ -3002,7 +3298,7 @@ export default function App() {
                                   Access Full Blueprint
                                   <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform duration-500" />
                                 </button>
-                                <button 
+                                <button
                                   onClick={() => {
                                     navigator.clipboard.writeText(window.location.href);
                                     setShowCopied(true);
@@ -3038,17 +3334,37 @@ export default function App() {
                               className="space-y-6"
                             >
                               <div className="bg-white/5 border border-white/10 p-6 rounded-2xl">
-                                <h3 className="text-xl font-serif text-white mb-4">Tools of the Trade</h3>
-                                <p className="text-sm text-gray-400 mb-8 font-light">Essential resources to launch your {selectedIdea.title} business.</p>
-                                
+                                <h3 className="text-xl font-serif text-white mb-4">
+                                  Tools of the Trade
+                                </h3>
+                                <p className="text-sm text-gray-400 mb-8 font-light">
+                                  Essential resources to launch your {selectedIdea.title} business.
+                                </p>
+
                                 <div className="space-y-4">
                                   {[
-                                    { name: 'Mercury', desc: 'Modern business banking for startups.', link: 'https://mercury.com' },
-                                    { name: 'Stripe', desc: 'Accept payments and manage billing.', link: 'https://stripe.com' },
-                                    { name: 'Next Insurance', desc: 'Tailored business insurance for local services.', link: 'https://nextinsurance.com' },
-                                    { name: 'Northwest Registered Agent', desc: 'Professional LLC formation and compliance.', link: 'https://northwestregisteredagent.com' }
+                                    {
+                                      name: 'Mercury',
+                                      desc: 'Modern business banking for startups.',
+                                      link: 'https://mercury.com',
+                                    },
+                                    {
+                                      name: 'Stripe',
+                                      desc: 'Accept payments and manage billing.',
+                                      link: 'https://stripe.com',
+                                    },
+                                    {
+                                      name: 'Next Insurance',
+                                      desc: 'Tailored business insurance for local services.',
+                                      link: 'https://nextinsurance.com',
+                                    },
+                                    {
+                                      name: 'Northwest Registered Agent',
+                                      desc: 'Professional LLC formation and compliance.',
+                                      link: 'https://northwestregisteredagent.com',
+                                    },
                                   ].map((tool, i) => (
-                                    <a 
+                                    <a
                                       key={i}
                                       href={tool.link}
                                       target="_blank"
@@ -3056,7 +3372,9 @@ export default function App() {
                                       className="flex items-center justify-between p-4 bg-white/5 border border-white/5 rounded-xl hover:border-gold/30 transition-all group"
                                     >
                                       <div>
-                                        <h4 className="text-sm font-bold text-white group-hover:text-gold transition-colors">{tool.name}</h4>
+                                        <h4 className="text-sm font-bold text-white group-hover:text-gold transition-colors">
+                                          {tool.name}
+                                        </h4>
                                         <p className="text-xs text-gray-500">{tool.desc}</p>
                                       </div>
                                       <ExternalLink className="w-4 h-4 text-gray-600 group-hover:text-gold" />
@@ -3076,9 +3394,14 @@ export default function App() {
                               className="space-y-6"
                             >
                               <div className="bg-white/5 border border-white/10 p-6 rounded-2xl">
-                                <h3 className="text-xl font-serif text-white mb-4">Profitability Simulator</h3>
-                                <p className="text-sm text-gray-400 mb-6 font-light">Adjust the variables below to see your potential monthly net profit.</p>
-                                
+                                <h3 className="text-xl font-serif text-white mb-4">
+                                  Profitability Simulator
+                                </h3>
+                                <p className="text-sm text-gray-400 mb-6 font-light">
+                                  Adjust the variables below to see your potential monthly net
+                                  profit.
+                                </p>
+
                                 <CalculatorSection idea={selectedIdea} />
                               </div>
                             </motion.div>
@@ -3093,11 +3416,16 @@ export default function App() {
                               className="space-y-6"
                             >
                               <div className="bg-white/5 border border-white/10 p-6 rounded-2xl">
-                                <h3 className="text-xl font-serif text-white mb-4">30-Day Launch Roadmap</h3>
-                                <p className="text-sm text-gray-400 mb-8 font-light">Your step-by-step guide to going from zero to your first paying client. Progress is saved automatically.</p>
-                                
-                                <LaunchRoadmap 
-                                  idea={selectedIdea} 
+                                <h3 className="text-xl font-serif text-white mb-4">
+                                  30-Day Launch Roadmap
+                                </h3>
+                                <p className="text-sm text-gray-400 mb-8 font-light">
+                                  Your step-by-step guide to going from zero to your first paying
+                                  client. Progress is saved automatically.
+                                </p>
+
+                                <LaunchRoadmap
+                                  idea={selectedIdea}
                                   checkedSteps={checkedSteps}
                                   onToggleStep={toggleStep}
                                 />
@@ -3109,7 +3437,7 @@ export default function App() {
                     </div>
                   </motion.div>
                 ) : (
-                  <motion.div 
+                  <motion.div
                     key="plan"
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
@@ -3119,51 +3447,91 @@ export default function App() {
                     <div className="max-w-2xl mx-auto">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-12 border-b-2 border-luxury-black pb-6">
                         <div>
-                          <h2 className="text-2xl sm:text-3xl font-serif uppercase tracking-tighter">Execution Plan</h2>
-                          <p className="text-sm text-gray-500 font-mono">ID: {selectedIdea.id.padStart(4, '0')} | {selectedIdea.category}</p>
+                          <h2 className="text-2xl sm:text-3xl font-serif uppercase tracking-tighter">
+                            Execution Plan
+                          </h2>
+                          <p className="text-sm text-gray-500 font-mono">
+                            ID: {selectedIdea.id.padStart(4, '0')} | {selectedIdea.category}
+                          </p>
                         </div>
                         <div className="text-left sm:text-right">
-                          <p className="text-xs uppercase tracking-widest font-bold">Business Ventures</p>
+                          <p className="text-xs uppercase tracking-widest font-bold">
+                            Business Ventures
+                          </p>
                           <p className="text-[10px] text-gray-400">Proprietary Blueprint</p>
                         </div>
                       </div>
 
                       <div className="space-y-12">
                         <section>
-                          <h3 className="text-lg font-bold uppercase tracking-widest mb-4 border-l-4 border-gold pl-4">01. Executive Summary</h3>
+                          <h3 className="text-lg font-bold uppercase tracking-widest mb-4 border-l-4 border-gold pl-4">
+                            01. Executive Summary
+                          </h3>
                           <p className="text-gray-700 leading-relaxed text-sm sm:text-base">
-                            The <span className="font-bold">{selectedIdea.title}</span> venture is a high-margin local service business designed for rapid deployment. 
-                            With a low initial overhead and a focus on essential maintenance/service, this model prioritizes recurring revenue and word-of-mouth growth.
+                            The <span className="font-bold">{selectedIdea.title}</span> venture is a
+                            high-margin local service business designed for rapid deployment. With a
+                            low initial overhead and a focus on essential maintenance/service, this
+                            model prioritizes recurring revenue and word-of-mouth growth.
                           </p>
                         </section>
 
                         <section>
-                          <h3 className="text-lg font-bold uppercase tracking-widest mb-4 border-l-4 border-gold pl-4">02. Financial Roadmap</h3>
+                          <h3 className="text-lg font-bold uppercase tracking-widest mb-4 border-l-4 border-gold pl-4">
+                            02. Financial Roadmap
+                          </h3>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8 bg-gray-50 p-6 rounded-lg">
                             <div>
-                              <p className="text-xs text-gray-500 uppercase mb-1">Capital Requirement</p>
-                              <p className="text-xl sm:text-2xl font-serif">${selectedIdea.startupCost.min} - ${selectedIdea.startupCost.max}</p>
-                              <p className="text-[10px] text-gray-400 mt-2 italic">Includes equipment, initial marketing, and licensing.</p>
+                              <p className="text-xs text-gray-500 uppercase mb-1">
+                                Capital Requirement
+                              </p>
+                              <p className="text-xl sm:text-2xl font-serif">
+                                ${selectedIdea.startupCost.min} - ${selectedIdea.startupCost.max}
+                              </p>
+                              <p className="text-[10px] text-gray-400 mt-2 italic">
+                                Includes equipment, initial marketing, and licensing.
+                              </p>
                             </div>
                             <div>
-                              <p className="text-xs text-gray-500 uppercase mb-1">Target Annual Yield</p>
-                              <p className="text-xl sm:text-2xl font-serif">{selectedIdea.potentialIncome}</p>
-                              <p className="text-[10px] text-gray-400 mt-2 italic">Based on 15-20 billable hours per week.</p>
+                              <p className="text-xs text-gray-500 uppercase mb-1">
+                                Target Annual Yield
+                              </p>
+                              <p className="text-xl sm:text-2xl font-serif">
+                                {selectedIdea.potentialIncome}
+                              </p>
+                              <p className="text-[10px] text-gray-400 mt-2 italic">
+                                Based on 15-20 billable hours per week.
+                              </p>
                             </div>
                           </div>
                         </section>
 
                         <section>
-                          <h3 className="text-lg font-bold uppercase tracking-widest mb-4 border-l-4 border-gold pl-4">03. 30-Day Launch Sequence</h3>
+                          <h3 className="text-lg font-bold uppercase tracking-widest mb-4 border-l-4 border-gold pl-4">
+                            03. 30-Day Launch Sequence
+                          </h3>
                           <div className="space-y-4">
                             {[
-                              { day: '01-05', task: 'Register LLC, obtain local business license, and secure specialized insurance.' },
-                              { day: '06-12', task: 'Procure core equipment and set up a professional Google Business Profile.' },
-                              { day: '13-20', task: 'Execute initial customer acquisition strategies (Nextdoor, Facebook, Door Hangers).' },
-                              { day: '21-30', task: 'Complete first 3-5 "Beta" jobs at a discount to secure reviews and testimonials.' }
+                              {
+                                day: '01-05',
+                                task: 'Register LLC, obtain local business license, and secure specialized insurance.',
+                              },
+                              {
+                                day: '06-12',
+                                task: 'Procure core equipment and set up a professional Google Business Profile.',
+                              },
+                              {
+                                day: '13-20',
+                                task: 'Execute initial customer acquisition strategies (Nextdoor, Facebook, Door Hangers).',
+                              },
+                              {
+                                day: '21-30',
+                                task: 'Complete first 3-5 "Beta" jobs at a discount to secure reviews and testimonials.',
+                              },
                             ].map((step, i) => (
                               <div key={i} className="flex gap-6 items-start">
-                                <span className="font-mono text-gold font-bold text-sm pt-1">D.{step.day}</span>
+                                <span className="font-mono text-gold font-bold text-sm pt-1">
+                                  D.{step.day}
+                                </span>
                                 <p className="text-sm text-gray-700">{step.task}</p>
                               </div>
                             ))}
@@ -3171,9 +3539,12 @@ export default function App() {
                         </section>
 
                         <section>
-                          <h3 className="text-lg font-bold uppercase tracking-widest mb-4 border-l-4 border-gold pl-4">04. Growth & Scale</h3>
+                          <h3 className="text-lg font-bold uppercase tracking-widest mb-4 border-l-4 border-gold pl-4">
+                            04. Growth & Scale
+                          </h3>
                           <p className="text-gray-700 leading-relaxed mb-4">
-                            Once the first 10 recurring clients are secured, focus shifts to optimization:
+                            Once the first 10 recurring clients are secured, focus shifts to
+                            optimization:
                           </p>
                           <ul className="list-disc list-inside text-sm text-gray-600 space-y-2 ml-4">
                             <li>Implement automated invoicing and scheduling software.</li>
@@ -3183,22 +3554,28 @@ export default function App() {
                         </section>
 
                         <section className="bg-gray-100 p-8 rounded-xl border-l-4 border-luxury-black">
-                          <h3 className="text-sm font-bold uppercase tracking-widest mb-3">Regulatory Compliance Notice</h3>
+                          <h3 className="text-sm font-bold uppercase tracking-widest mb-3">
+                            Regulatory Compliance Notice
+                          </h3>
                           <p className="text-xs text-gray-600 leading-relaxed italic">
-                            This blueprint provides a general operational framework. It is the user's sole responsibility to perform due diligence regarding local zoning laws, professional certifications, and municipal permit requirements. We strongly recommend consulting with a local business advisor or legal counsel before commencing operations.
+                            This blueprint provides a general operational framework. It is the
+                            user's sole responsibility to perform due diligence regarding local
+                            zoning laws, professional certifications, and municipal permit
+                            requirements. We strongly recommend consulting with a local business
+                            advisor or legal counsel before commencing operations.
                           </p>
                         </section>
                       </div>
 
                       <div className="mt-16 pt-8 border-t border-gray-200 flex justify-between items-center">
-                        <button 
+                        <button
                           onClick={() => setShowExecutionPlan(false)}
                           className="text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:text-gold transition-colors"
                         >
                           <ArrowRight className="w-4 h-4 rotate-180" />
                           Back to Details
                         </button>
-                        <button 
+                        <button
                           onClick={() => window.print()}
                           className="px-6 py-2 bg-luxury-black text-white text-xs font-bold uppercase tracking-widest rounded hover:bg-gray-800 transition-colors"
                         >
@@ -3220,9 +3597,9 @@ export default function App() {
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[120]"
           >
-            <ComparisonModal 
-              ideas={allIdeas.filter(i => favorites.includes(i.id))} 
-              onClose={() => setShowComparison(false)} 
+            <ComparisonModal
+              ideas={allIdeas.filter((i) => favorites.includes(i.id))}
+              onClose={() => setShowComparison(false)}
             />
           </motion.div>
         )}
@@ -3231,34 +3608,38 @@ export default function App() {
       {/* Paywall Modal */}
       <AnimatePresence>
         {showPaywall && (
-          <motion.div 
+          <motion.div
             key="paywall-overlay"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/95 backdrop-blur-2xl"
           >
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                className="bg-luxury-black border border-gold/30 rounded-[2.5rem] max-w-2xl w-full max-h-[90vh] shadow-[0_0_100px_rgba(212,175,55,0.2)] relative flex flex-col overflow-hidden"
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-luxury-black border border-gold/30 rounded-[2.5rem] max-w-2xl w-full max-h-[90vh] shadow-[0_0_100px_rgba(212,175,55,0.2)] relative flex flex-col overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-1 gold-gradient z-10 pointer-events-none" />
+              <button
+                onClick={() => setShowPaywall(false)}
+                className="absolute top-6 right-6 z-20 p-2 hover:bg-white/10 rounded-full transition-colors"
               >
-                <div className="absolute top-0 left-0 w-full h-1 gold-gradient z-10 pointer-events-none" />
-                <button 
-                  onClick={() => setShowPaywall(false)}
-                  className="absolute top-6 right-6 z-20 p-2 hover:bg-white/10 rounded-full transition-colors"
-                >
-                  <X className="w-6 h-6 text-gray-500" />
-                </button>
+                <X className="w-6 h-6 text-gray-500" />
+              </button>
 
-                <div className="scrollbar-stable-paywall flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 sm:px-8 md:px-12 pt-6 sm:pt-8 md:pt-12 pb-6 sm:pb-8 md:pb-12">
+              <div className="scrollbar-stable-paywall flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 sm:px-8 md:px-12 pt-6 sm:pt-8 md:pt-12 pb-6 sm:pb-8 md:pb-12">
                 <div className="text-center mb-10">
                   <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gold/10 rounded-3xl flex items-center justify-center mx-auto mb-6 rotate-12 border border-gold/20">
                     <Sparkles className="w-8 h-8 sm:w-10 sm:h-10 text-gold" />
                   </div>
-                  <h2 className="text-3xl sm:text-4xl font-serif text-white mb-4">Unlock the Full Catalog</h2>
-                  <p className="text-gray-400 text-base sm:text-lg font-light">Join 2,400+ entrepreneurs building high-margin local empires.</p>
+                  <h2 className="text-3xl sm:text-4xl font-serif text-white mb-4">
+                    Unlock the Full Catalog
+                  </h2>
+                  <p className="text-gray-400 text-base sm:text-lg font-light">
+                    Join 2,400+ entrepreneurs building high-margin local empires.
+                  </p>
                 </div>
 
                 <div className="space-y-4 sm:space-y-6 mb-10">
@@ -3268,13 +3649,15 @@ export default function App() {
                     'Interactive 30-Day Launch Roadmap',
                     'Side-by-Side Opportunity Comparison',
                     'Profitability & ROI Simulator',
-                    'Priority Support & Community Access'
+                    'Priority Support & Community Access',
                   ].map((feature, i) => (
                     <div key={i} className="flex items-center gap-4 text-left">
                       <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-gold/20 flex items-center justify-center flex-shrink-0">
                         <CheckCircle2 className="w-3 h-3 sm:w-4 sm:h-4 text-gold" />
                       </div>
-                      <span className="text-gray-300 font-light text-sm sm:text-base">{feature}</span>
+                      <span className="text-gray-300 font-light text-sm sm:text-base">
+                        {feature}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -3284,11 +3667,13 @@ export default function App() {
                     <span className="text-gray-500 line-through text-lg sm:text-xl">$149</span>
                     <span className="text-4xl sm:text-5xl font-serif text-white">$49</span>
                   </div>
-                  <p className="text-gold text-[10px] sm:text-xs uppercase tracking-widest font-bold">One-Time Lifetime Access</p>
+                  <p className="text-gold text-[10px] sm:text-xs uppercase tracking-widest font-bold">
+                    One-Time Lifetime Access
+                  </p>
                 </div>
 
                 {!user ? (
-                  <button 
+                  <button
                     onClick={() => {
                       setAuthMode('login');
                       setShowAuthModal(true);
@@ -3299,7 +3684,7 @@ export default function App() {
                     Sign in to Purchase
                   </button>
                 ) : (
-                  <button 
+                  <button
                     onClick={handleStripeCheckout}
                     disabled={isProcessingPayment}
                     className="w-full py-4 sm:py-5 gold-gradient text-luxury-black font-bold rounded-2xl text-lg sm:text-xl shadow-[0_20px_40px_rgba(212,175,55,0.3)] hover:scale-[1.02] transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -3326,14 +3711,17 @@ export default function App() {
                     }`}
                   >
                     {entitlementState === 'paymentPending' && 'Payment pending verification...'}
-                    {entitlementState === 'paymentVerified' && 'Payment verified. Premium access is active.'}
-                    {entitlementState === 'paymentFailed' && 'Payment verification failed. Please try again.'}
+                    {entitlementState === 'paymentVerified' &&
+                      'Payment verified. Premium access is active.'}
+                    {entitlementState === 'paymentFailed' &&
+                      'Payment verification failed. Please try again.'}
                   </p>
                 )}
 
                 {user && !isPaid && localPaidHint && (
                   <p className="mt-2 text-center text-[11px] text-gray-400">
-                    Previous local premium cache found. Access is granted only after server verification.
+                    Previous local premium cache found. Access is granted only after server
+                    verification.
                   </p>
                 )}
 
@@ -3341,7 +3729,7 @@ export default function App() {
                 <p className="text-center text-[10px] text-gray-600 mt-8 uppercase tracking-widest">
                   Secure payment via Stripe
                 </p>
-                </div>
+              </div>
             </motion.div>
           </motion.div>
         )}
@@ -3350,27 +3738,40 @@ export default function App() {
       {/* Footer */}
       <footer className="border-t border-white/5 py-12 mt-20">
         <div className="max-w-7xl mx-auto px-4 text-center">
-          <h2 className="text-2xl font-serif mb-4">Business <span className="text-gold">Ventures</span></h2>
+          <h2 className="text-2xl font-serif mb-4">
+            Business <span className="text-gold">Ventures</span>
+          </h2>
           <p className="text-gray-500 text-sm font-light max-w-md mx-auto">
-            Curating the most reliable paths to financial independence through simple, local service businesses.
+            Curating the most reliable paths to financial independence through simple, local service
+            businesses.
           </p>
           <div className="mt-8 flex justify-center gap-6 text-gray-600 text-xs uppercase tracking-widest">
-            <button onClick={() => setShowPrivacy(true)} className="hover:text-gold transition-colors">Privacy</button>
-            <button onClick={() => setShowTerms(true)} className="hover:text-gold transition-colors">Terms</button>
+            <button
+              onClick={() => setShowPrivacy(true)}
+              className="hover:text-gold transition-colors"
+            >
+              Privacy
+            </button>
+            <button
+              onClick={() => setShowTerms(true)}
+              className="hover:text-gold transition-colors"
+            >
+              Terms
+            </button>
           </div>
         </div>
       </footer>
       {/* Privacy Modal */}
       <AnimatePresence>
         {showPrivacy && (
-          <motion.div 
+          <motion.div
             key="privacy-modal-overlay"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl"
           >
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
@@ -3379,34 +3780,54 @@ export default function App() {
               <div className="flex justify-between items-start mb-12">
                 <div>
                   <h2 className="text-3xl font-serif text-white mb-2">Privacy Policy</h2>
-                  <p className="text-[10px] text-gold font-display font-bold uppercase tracking-widest">Confidentiality Agreement</p>
+                  <p className="text-[10px] text-gold font-display font-bold uppercase tracking-widest">
+                    Confidentiality Agreement
+                  </p>
                 </div>
-                <button onClick={() => setShowPrivacy(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                <button
+                  onClick={() => setShowPrivacy(false)}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                >
                   <X className="w-6 h-6 text-gray-400" />
                 </button>
               </div>
-              
+
               <div className="space-y-8 text-gray-400 font-light leading-relaxed">
                 <section>
                   <h3 className="text-white font-serif text-lg mb-3">Data Collection</h3>
-                  <p>We collect minimal data necessary to provide our curated business blueprints. This includes your email address for authentication and your shortlisted ventures for your personal dashboard.</p>
+                  <p>
+                    We collect minimal data necessary to provide our curated business blueprints.
+                    This includes your email address for authentication and your shortlisted
+                    ventures for your personal dashboard.
+                  </p>
                 </section>
                 <section>
                   <h3 className="text-white font-serif text-lg mb-3">Local Storage</h3>
-                  <p>To ensure maximum performance and privacy, many of your preferences are stored locally on your device via encrypted IndexedDB. This data remains under your control at all times.</p>
+                  <p>
+                    To ensure maximum performance and privacy, many of your preferences are stored
+                    locally on your device via encrypted IndexedDB. This data remains under your
+                    control at all times.
+                  </p>
                 </section>
                 <section>
                   <h3 className="text-white font-serif text-lg mb-3">Third-Party Services</h3>
-                  <p>We utilize Google Firebase for secure authentication and Stripe for encrypted payment processing. We never sell, trade, or otherwise transfer your personally identifiable information to outside parties.</p>
+                  <p>
+                    We utilize Google Firebase for secure authentication and Stripe for encrypted
+                    payment processing. We never sell, trade, or otherwise transfer your personally
+                    identifiable information to outside parties.
+                  </p>
                 </section>
                 <section>
                   <h3 className="text-white font-serif text-lg mb-3">Your Rights</h3>
-                  <p>You have the right to access, correct, or delete your personal data at any time through your account settings or by contacting our support team.</p>
+                  <p>
+                    You have the right to access, correct, or delete your personal data at any time
+                    through your account settings or by contacting our support team.
+                  </p>
                 </section>
               </div>
-              
+
               <div className="mt-12 pt-8 border-t border-white/5">
-                <button 
+                <button
                   onClick={() => setShowPrivacy(false)}
                   className="w-full py-4 bg-white/5 border border-white/10 text-white font-display font-bold uppercase tracking-widest text-[10px] rounded-xl hover:bg-white/10 transition-all"
                 >
@@ -3421,14 +3842,14 @@ export default function App() {
       {/* Terms Modal */}
       <AnimatePresence>
         {showTerms && (
-          <motion.div 
+          <motion.div
             key="terms-modal-overlay"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl"
           >
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
@@ -3437,25 +3858,43 @@ export default function App() {
               <div className="flex justify-between items-start mb-12">
                 <div>
                   <h2 className="text-3xl font-serif text-white mb-2">Terms of Service</h2>
-                  <p className="text-[10px] text-gold font-display font-bold uppercase tracking-widest">Usage Agreement</p>
+                  <p className="text-[10px] text-gold font-display font-bold uppercase tracking-widest">
+                    Usage Agreement
+                  </p>
                 </div>
-                <button onClick={() => setShowTerms(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                <button
+                  onClick={() => setShowTerms(false)}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                >
                   <X className="w-6 h-6 text-gray-400" />
                 </button>
               </div>
-              
+
               <div className="space-y-8 text-gray-400 font-light leading-relaxed">
                 <section>
                   <h3 className="text-white font-serif text-lg mb-3">Intellectual Property</h3>
-                  <p>All business blueprints, market insights, and curated strategies provided by Business Ventures are proprietary. Access is granted for personal use only and may not be redistributed or resold.</p>
+                  <p>
+                    All business blueprints, market insights, and curated strategies provided by
+                    Business Ventures are proprietary. Access is granted for personal use only and
+                    may not be redistributed or resold.
+                  </p>
                 </section>
                 <section>
                   <h3 className="text-white font-serif text-lg mb-3">No Financial Advice</h3>
-                  <p>The information provided is for educational and inspirational purposes only. We are not financial advisors. Starting a business involves risk, and results are not guaranteed.</p>
+                  <p>
+                    The information provided is for educational and inspirational purposes only. We
+                    are not financial advisors. Starting a business involves risk, and results are
+                    not guaranteed.
+                  </p>
                 </section>
                 <section>
                   <h3 className="text-white font-serif text-lg mb-3">Due Diligence</h3>
-                  <p>It is the user's sole responsibility to research and comply with all local, state, and federal regulations. This includes, but is not limited to, obtaining necessary business licenses, professional certifications, and municipal permits required for each specific business opportunity.</p>
+                  <p>
+                    It is the user's sole responsibility to research and comply with all local,
+                    state, and federal regulations. This includes, but is not limited to, obtaining
+                    necessary business licenses, professional certifications, and municipal permits
+                    required for each specific business opportunity.
+                  </p>
                 </section>
                 <section>
                   <h3 className="text-white font-serif text-lg mb-3">Subscription & Access</h3>
@@ -3463,12 +3902,16 @@ export default function App() {
                 </section>
                 <section>
                   <h3 className="text-white font-serif text-lg mb-3">Limitation of Liability</h3>
-                  <p>Business Ventures shall not be liable for any indirect, incidental, or consequential damages resulting from the use or inability to use our services or blueprints.</p>
+                  <p>
+                    Business Ventures shall not be liable for any indirect, incidental, or
+                    consequential damages resulting from the use or inability to use our services or
+                    blueprints.
+                  </p>
                 </section>
               </div>
-              
+
               <div className="mt-12 pt-8 border-t border-white/5">
-                <button 
+                <button
                   onClick={() => setShowTerms(false)}
                   className="w-full py-4 bg-white/5 border border-white/10 text-white font-display font-bold uppercase tracking-widest text-[10px] rounded-xl hover:bg-white/10 transition-all"
                 >

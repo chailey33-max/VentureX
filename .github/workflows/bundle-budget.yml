@@ -3,19 +3,19 @@ name: Bundle Budget
 on:
   pull_request:
     paths:
-      - "src/**"
-      - "vite.config.ts"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - ".github/workflows/bundle-budget.yml"
+      - 'src/**'
+      - 'vite.config.ts'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/bundle-budget.yml'
   push:
-    branches: ["main"]
+    branches: ['main']
     paths:
-      - "src/**"
-      - "vite.config.ts"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - ".github/workflows/bundle-budget.yml"
+      - 'src/**'
+      - 'vite.config.ts'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/bundle-budget.yml'
 
 jobs:
   bundle-budget:
@@ -32,13 +32,13 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: "pnpm"
+          node-version: '22'
+          cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Build with budget
         env:
-          BUNDLE_BUDGET_JS_BYTES: "950000"
+          BUNDLE_BUDGET_JS_BYTES: '950000'
         run: pnpm run build:with-budget

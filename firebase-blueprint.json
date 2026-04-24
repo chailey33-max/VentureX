@@ -7,8 +7,14 @@
       "properties": {
         "id": { "type": "string", "description": "Unique identifier for the business idea." },
         "title": { "type": "string", "description": "The name of the business venture." },
-        "category": { "type": "string", "description": "Industry category (e.g., Landscaping, Tech)." },
-        "description": { "type": "string", "description": "Detailed description of the opportunity." },
+        "category": {
+          "type": "string",
+          "description": "Industry category (e.g., Landscaping, Tech)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed description of the opportunity."
+        },
         "startupCost": {
           "type": "object",
           "properties": {
@@ -23,10 +29,22 @@
           "items": { "type": "string" },
           "description": "List of strategies for getting customers."
         },
-        "upsell": { "type": "string", "description": "Potential high-ticket upgrade or recurring service." },
+        "upsell": {
+          "type": "string",
+          "description": "Potential high-ticket upgrade or recurring service."
+        },
         "image": { "type": "string", "description": "URL to a representative image." }
       },
-      "required": ["id", "title", "category", "description", "startupCost", "potentialIncome", "customerAcquisition", "image"]
+      "required": [
+        "id",
+        "title",
+        "category",
+        "description",
+        "startupCost",
+        "potentialIncome",
+        "customerAcquisition",
+        "image"
+      ]
     },
     "UserProfile": {
       "title": "User Profile",
@@ -36,7 +54,11 @@
         "uid": { "type": "string", "description": "Firebase Auth UID." },
         "email": { "type": "string", "description": "User's primary email address." },
         "isPaid": { "type": "boolean", "description": "Whether the user has premium access." },
-        "role": { "type": "string", "enum": ["user", "pro", "admin"], "description": "Account permission level." },
+        "role": {
+          "type": "string",
+          "enum": ["user", "pro", "admin"],
+          "description": "Account permission level."
+        },
         "subscriptionStatus": { "type": "string", "description": "Stripe subscription state." },
         "plan": { "type": "string", "description": "Active subscription plan name." },
         "favorites": {

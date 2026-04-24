@@ -1,0 +1,60 @@
+name: Code Quality Gates
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'server.ts'
+      - 'tsconfig.json'
+      - 'eslint.config.js'
+      - '.prettierrc.json'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/code-quality.yml'
+  push:
+    branches: ['main']
+    paths:
+      - 'src/**'
+      - 'server.ts'
+      - 'tsconfig.json'
+      - 'eslint.config.js'
+      - '.prettierrc.json'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/code-quality.yml'
+
+jobs:
+  quality-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint TS/TSX
+        run: pnpm run lint
+
+      - name: Type check
+        run: pnpm run typecheck
+
+      - name: Run tests
+        run: pnpm run test:ci
+
+      - name: Check formatting
+        run: pnpm run format:check
+
+      - name: Check file guardrails
+        run: pnpm run check:file-guardrails

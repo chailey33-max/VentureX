@@ -1,5 +1,5 @@
-import { auth } from "../firebase";
-import { BusinessIdea } from "../types";
+import { auth } from '../firebase';
+import { BusinessIdea } from '../types';
 
 type IdeasResponse = {
   ideas: BusinessIdea[];
@@ -12,13 +12,13 @@ type BrandNamesResponse = {
 async function getAuthHeader(): Promise<Record<string, string>> {
   const currentUser = auth.currentUser;
   if (!currentUser) {
-    throw new Error("Please sign in to use AI generation.");
+    throw new Error('Please sign in to use AI generation.');
   }
 
   const token = await currentUser.getIdToken();
   return {
     Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
+    'Content-Type': 'application/json',
   };
 }
 
@@ -29,7 +29,7 @@ async function postToAiEndpoint<T>(
 ): Promise<T> {
   const headers = await getAuthHeader();
   const requestInit: RequestInit = {
-    method: "POST",
+    method: 'POST',
     headers,
     body: JSON.stringify(payload),
   };
@@ -39,7 +39,11 @@ async function postToAiEndpoint<T>(
 
   // Netlify static deployments may not route /api/* unless explicit redirects/functions exist.
   // Fallback directly to function path if we detect HTML/404 from platform.
-  if (rawBody.trim().startsWith("<!DOCTYPE") || rawBody.trim().startsWith("<html") || response.status === 404) {
+  if (
+    rawBody.trim().startsWith('<!DOCTYPE') ||
+    rawBody.trim().startsWith('<html') ||
+    response.status === 404
+  ) {
     response = await fetch(netlifyFunctionEndpoint, requestInit);
     rawBody = await response.text();
   }
@@ -49,7 +53,7 @@ async function postToAiEndpoint<T>(
     try {
       parsed = JSON.parse(rawBody);
     } catch {
-      throw new Error("Server returned invalid response format.");
+      throw new Error('Server returned invalid response format.');
     }
   }
 
@@ -63,14 +67,14 @@ async function postToAiEndpoint<T>(
 export async function generateNewIdeas(existingTitles: string[]): Promise<BusinessIdea[]> {
   try {
     const data = await postToAiEndpoint<IdeasResponse>(
-      "/api/ai/generate-ideas",
-      "/.netlify/functions/generate-ideas",
+      '/api/ai/generate-ideas',
+      '/.netlify/functions/generate-ideas',
       { existingTitles }
     );
 
     return Array.isArray(data?.ideas) ? data.ideas : [];
   } catch (error) {
-    console.error("Failed to parse AI response:", error);
+    console.error('Failed to parse AI response:', error);
     return [];
   }
 }
@@ -78,14 +82,14 @@ export async function generateNewIdeas(existingTitles: string[]): Promise<Busine
 export async function generateBrandNames(ideaTitle: string): Promise<string[]> {
   try {
     const data = await postToAiEndpoint<BrandNamesResponse>(
-      "/api/ai/generate-brand-names",
-      "/.netlify/functions/generate-brand-names",
+      '/api/ai/generate-brand-names',
+      '/.netlify/functions/generate-brand-names',
       { ideaTitle }
     );
 
     return Array.isArray(data?.names) ? data.names : [];
   } catch (error) {
-    console.error("Failed to generate AI brand names:", error);
+    console.error('Failed to generate AI brand names:', error);
     return [];
   }
 }

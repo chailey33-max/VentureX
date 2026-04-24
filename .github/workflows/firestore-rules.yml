@@ -3,21 +3,21 @@ name: Firestore Rules Validation
 on:
   pull_request:
     paths:
-      - "firestore.rules"
-      - "eslint.config.js"
-      - "package.json"
-      - "package-lock.json"
-      - "pnpm-lock.yaml"
-      - ".github/workflows/firestore-rules.yml"
+      - 'firestore.rules'
+      - 'eslint.config.js'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/firestore-rules.yml'
   push:
-    branches: ["main"]
+    branches: ['main']
     paths:
-      - "firestore.rules"
-      - "eslint.config.js"
-      - "package.json"
-      - "package-lock.json"
-      - "pnpm-lock.yaml"
-      - ".github/workflows/firestore-rules.yml"
+      - 'firestore.rules'
+      - 'eslint.config.js'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/firestore-rules.yml'
 
 jobs:
   firestore-rules:
@@ -34,8 +34,8 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: "pnpm"
+          node-version: '22'
+          cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
