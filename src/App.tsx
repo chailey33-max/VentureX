@@ -255,6 +255,9 @@ const ComparisonModal = ({ ideas, onClose }: { ideas: BusinessIdea[]; onClose: (
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="comparison-modal-title"
         className="bg-luxury-black border border-white/10 rounded-3xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl"
       >
         <div className="p-10 border-b border-white/10 flex justify-between items-center bg-white/[0.02]">
@@ -262,7 +265,9 @@ const ComparisonModal = ({ ideas, onClose }: { ideas: BusinessIdea[]; onClose: (
             <span className="text-gold text-[10px] font-display font-bold uppercase tracking-[0.4em] mb-2 block">
               Investment Analysis
             </span>
-            <h2 className="text-4xl font-serif text-white">Side-by-Side Comparison</h2>
+            <h2 id="comparison-modal-title" className="text-4xl font-serif text-white">
+              Side-by-Side Comparison
+            </h2>
           </div>
           <button
             aria-label="Close comparison report"
@@ -394,11 +399,14 @@ const AuthModal = ({
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-modal-title"
         className="bg-luxury-black border border-white/10 rounded-3xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl custom-scrollbar"
       >
         <div className="p-8 border-b border-white/10 flex justify-between items-center bg-white/[0.02]">
           <div>
-            <h2 className="text-2xl font-serif text-white">
+            <h2 id="auth-modal-title" className="text-2xl font-serif text-white">
               {mode === 'login'
                 ? 'Welcome Back'
                 : mode === 'signup'
@@ -2007,9 +2015,9 @@ export default function App() {
               <TrendingUp className="w-6 h-6 text-luxury-black" />
             </div>
             <div>
-              <h1 className="text-xl font-display font-bold tracking-tighter text-white group-hover:text-gold transition-colors uppercase">
+              <span className="text-xl font-display font-bold tracking-tighter text-white group-hover:text-gold transition-colors uppercase">
                 VENTURE<span className="text-gold">X</span>
-              </h1>
+              </span>
               <p className="text-[10px] font-display font-bold uppercase tracking-[0.3em] text-gray-500">
                 Luxury Business Curator
               </p>
@@ -2263,8 +2271,11 @@ export default function App() {
           </div>
 
           {/* Animated Background Text */}
-          <div className="absolute top-1/2 right-[-10%] translate-y-[-50%] opacity-[0.02] pointer-events-none select-none hidden lg:block">
-            <h3 className="text-[30rem] font-serif italic leading-none">Wealth</h3>
+          <div
+            className="absolute top-1/2 right-[-10%] translate-y-[-50%] opacity-[0.02] pointer-events-none select-none hidden lg:block"
+            aria-hidden="true"
+          >
+            <span className="text-[30rem] font-serif italic leading-none">Wealth</span>
           </div>
         </header>
       ) : (
@@ -2477,12 +2488,17 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="revert-modal-title"
               className="bg-gray-900 border border-red-500/20 rounded-2xl p-8 max-w-md w-full shadow-2xl text-center"
             >
               <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
                 <RotateCcw className="w-8 h-8 text-red-500" />
               </div>
-              <h3 className="text-2xl font-bold text-white mb-2">Revert to Cloud?</h3>
+              <h3 id="revert-modal-title" className="text-2xl font-bold text-white mb-2">
+                Revert to Cloud?
+              </h3>
               <p className="text-gray-400 mb-8">
                 This will discard all your local changes and pull the latest data from the cloud.
                 This action cannot be undone.
@@ -2516,9 +2532,14 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="reset-modal-title"
               className="bg-gray-900 border border-white/10 rounded-2xl p-6 max-w-md w-full shadow-2xl"
             >
-              <h3 className="text-xl font-bold text-white mb-2">Reset All Ideas?</h3>
+              <h3 id="reset-modal-title" className="text-xl font-bold text-white mb-2">
+                Reset All Ideas?
+              </h3>
               <p className="text-gray-400 mb-6">
                 This will delete all your custom business ideas, edits, and uploaded pictures. This
                 action cannot be undone.
@@ -2554,12 +2575,17 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="dedup-modal-title"
               className="bg-gray-900 border border-gold/20 rounded-2xl p-8 max-w-md w-full shadow-2xl text-center"
             >
               <div className="w-16 h-16 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-6">
                 <AlertCircle className="w-8 h-8 text-gold" />
               </div>
-              <h3 className="text-2xl font-bold text-white mb-2">Clean Up Duplicates?</h3>
+              <h3 id="dedup-modal-title" className="text-2xl font-bold text-white mb-2">
+                Clean Up Duplicates?
+              </h3>
               <p className="text-gray-400 mb-8">
                 I've found some duplicate business ideas. I can automatically merge them for you,
                 keeping the versions with your custom pictures and edits.
@@ -2593,12 +2619,17 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-modal-title"
               className="bg-gray-900 border border-red-500/20 rounded-2xl p-8 max-w-md w-full shadow-2xl text-center"
             >
               <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
                 <AlertCircle className="w-8 h-8 text-red-500" />
               </div>
-              <h3 className="text-2xl font-bold text-white mb-2">Delete Opportunity?</h3>
+              <h3 id="delete-modal-title" className="text-2xl font-bold text-white mb-2">
+                Delete Opportunity?
+              </h3>
               <p className="text-gray-400 mb-8">
                 Are you sure you want to remove "
                 <span className="text-white font-medium">
@@ -2630,10 +2661,11 @@ export default function App() {
 
       {/* Grid Section */}
       <main className="max-w-7xl mx-auto px-6 py-16 relative z-10">
+        <h2 className="sr-only">Business Opportunities</h2>
         {!hasAccess && (
           <div className="mb-16 p-8 bg-gold/10 border border-gold/20 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-8 backdrop-blur-xl">
             <div>
-              <h3 className="text-2xl font-serif text-white mb-2">Exclusive Sample Access</h3>
+              <h2 className="text-2xl font-serif text-white mb-2">Exclusive Sample Access</h2>
               <p className="text-sm text-gray-400 font-light">
                 You are viewing a curated selection of our premium business blueprints.
               </p>
@@ -2659,7 +2691,7 @@ export default function App() {
             <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-8 border border-white/10">
               <Search className="w-8 h-8 text-gray-500" />
             </div>
-            <h3 className="text-3xl font-serif text-white mb-4">No Matches Found</h3>
+            <h2 className="text-3xl font-serif text-white mb-4">No Matches Found</h2>
             <p className="text-gray-400 max-w-md mx-auto font-light leading-relaxed mb-10">
               We couldn't find any blueprints matching your current search. Try adjusting your
               filters or search terms.
@@ -2900,6 +2932,9 @@ export default function App() {
             />
 
             <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="idea-detail-title"
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -3099,7 +3134,10 @@ export default function App() {
 
                       <div className="flex-grow flex flex-col">
                         <div className="mb-10">
-                          <h2 className="text-4xl md:text-5xl font-serif mb-4 leading-tight tracking-tight">
+                          <h2
+                            id="idea-detail-title"
+                            className="text-4xl md:text-5xl font-serif mb-4 leading-tight tracking-tight"
+                          >
                             {selectedIdea.title}
                           </h2>
                           <p className="text-gray-400 font-light leading-relaxed text-lg max-w-3xl">
@@ -3606,6 +3644,9 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="upgrade-modal-title"
               className="bg-luxury-black border border-gold/30 rounded-[2.5rem] max-w-2xl w-full max-h-[90vh] shadow-[0_0_100px_rgba(212,175,55,0.2)] relative flex flex-col overflow-hidden"
             >
               <div className="absolute top-0 left-0 w-full h-1 gold-gradient z-10 pointer-events-none" />
@@ -3622,7 +3663,10 @@ export default function App() {
                   <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gold/10 rounded-3xl flex items-center justify-center mx-auto mb-6 rotate-12 border border-gold/20">
                     <Sparkles className="w-8 h-8 sm:w-10 sm:h-10 text-gold" />
                   </div>
-                  <h2 className="text-3xl sm:text-4xl font-serif text-white mb-4">
+                  <h2
+                    id="upgrade-modal-title"
+                    className="text-3xl sm:text-4xl font-serif text-white mb-4"
+                  >
                     Unlock the Full Catalog
                   </h2>
                   <p className="text-gray-400 text-base sm:text-lg font-light">
@@ -3763,11 +3807,16 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="privacy-modal-title"
               className="luxury-card max-w-2xl w-full max-h-[90vh] overflow-y-auto p-8 sm:p-16"
             >
               <div className="flex justify-between items-start mb-12">
                 <div>
-                  <h2 className="text-3xl font-serif text-white mb-2">Privacy Policy</h2>
+                  <h2 id="privacy-modal-title" className="text-3xl font-serif text-white mb-2">
+                    Privacy Policy
+                  </h2>
                   <p className="text-[10px] text-gold font-display font-bold uppercase tracking-widest">
                     Confidentiality Agreement
                   </p>
@@ -3841,11 +3890,16 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="terms-modal-title"
               className="luxury-card max-w-2xl w-full max-h-[90vh] overflow-y-auto p-8 sm:p-16"
             >
               <div className="flex justify-between items-start mb-12">
                 <div>
-                  <h2 className="text-3xl font-serif text-white mb-2">Terms of Service</h2>
+                  <h2 id="terms-modal-title" className="text-3xl font-serif text-white mb-2">
+                    Terms of Service
+                  </h2>
                   <p className="text-[10px] text-gold font-display font-bold uppercase tracking-widest">
                     Usage Agreement
                   </p>

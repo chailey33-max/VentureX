@@ -81,6 +81,15 @@
   "overrides": {
     "protobufjs": "^7.5.5",
     "fast-xml-parser": "^5.7.1",
-    "@tootallnate/once": "^3.0.1"
+    "@tootallnate/once": "^3.0.1",
+    "uuid": ">=14.0.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "protobufjs": "^7.5.5",
+      "fast-xml-parser": "^5.7.1",
+      "@tootallnate/once": "^3.0.1",
+      "uuid": ">=14.0.0"
+    }
   }
 }
