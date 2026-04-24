@@ -260,7 +260,21 @@ async function startServer() {
   // Initialize Firebase Admin for audit compliance
   try {
     if (admin.apps.length === 0) {
-      if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      const serviceAccountJson =
+        process.env.FIREBASE_SERVICE_ACCOUNT_JSON ||
+        process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+      if (serviceAccountJson) {
+        const serviceAccount = JSON.parse(serviceAccountJson);
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+          projectId:
+            process.env.FIREBASE_PROJECT_ID ||
+            process.env.VITE_FIREBASE_PROJECT_ID ||
+            serviceAccount.project_id ||
+            undefined,
+        });
+        console.log('[Firebase] Admin initialized via FIREBASE_SERVICE_ACCOUNT_JSON.');
+      } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
         // Option A: Use the Service Account JSON found at the path
         admin.initializeApp({
           credential: admin.credential.applicationDefault(),

@@ -31,6 +31,16 @@ export default [
     },
   },
   {
+    files: ['api/**/*.js', 'netlify/functions/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+  {
     files: ['src/**/*.ts', 'src/**/*.tsx'],
     rules: {
       'max-lines': ['error', { max: 900, skipBlankLines: true, skipComments: true }],

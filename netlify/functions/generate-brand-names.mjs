@@ -3,13 +3,30 @@ import { GoogleGenAI } from '@google/genai';
 
 const getHeader = (event, headerName) => {
   const headers = event.headers || {};
-  return headers[headerName] || headers[headerName.toLowerCase()] || headers[headerName.toUpperCase()] || null;
+  return (
+    headers[headerName] ||
+    headers[headerName.toLowerCase()] ||
+    headers[headerName.toUpperCase()] ||
+    null
+  );
 };
 
 const initializeFirebaseAdmin = () => {
   if (admin.apps.length > 0) return;
 
   const projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID;
+
+  const serviceAccountJson =
+    process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+
+  if (serviceAccountJson) {
+    const serviceAccount = JSON.parse(serviceAccountJson);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      projectId: projectId || serviceAccount.project_id || undefined,
+    });
+    return;
+  }
 
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     admin.initializeApp({
@@ -27,7 +44,7 @@ const initializeFirebaseAdmin = () => {
   throw new Error('Firebase Admin is not configured.');
 };
 
-const verifyAuthToken = async event => {
+const verifyAuthToken = async (event) => {
   const authHeader = getHeader(event, 'authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw new Error('UNAUTHORIZED');
@@ -42,15 +59,18 @@ const verifyAuthToken = async event => {
   return admin.auth().verifyIdToken(token);
 };
 
-const validateIdeaTitle = value => {
+const validateIdeaTitle = (value) => {
   if (typeof value !== 'string') return null;
   const sanitized = value.trim();
   return sanitized.length >= 3 && sanitized.length <= 120 ? sanitized : null;
 };
 
-const stripCodeFence = text => String(text || '').replace(/```json\s*|\s*```/g, '').trim();
+const stripCodeFence = (text) =>
+  String(text || '')
+    .replace(/```json\s*|\s*```/g, '')
+    .trim();
 
-const parseJsonSafely = text => {
+const parseJsonSafely = (text) => {
   try {
     return JSON.parse(text);
   } catch {
@@ -58,15 +78,15 @@ const parseJsonSafely = text => {
   }
 };
 
-const parseStringArray = value => {
+const parseStringArray = (value) => {
   if (!Array.isArray(value)) return [];
-  return value.filter(item => typeof item === 'string' && item.trim().length > 0);
+  return value.filter((item) => typeof item === 'string' && item.trim().length > 0);
 };
 
 const rateLimitBuckets = new Map();
 const abuseBuckets = new Map();
 
-const getClientIp = event => {
+const getClientIp = (event) => {
   const forwarded = getHeader(event, 'x-forwarded-for');
   return typeof forwarded === 'string' ? forwarded.split(',')[0].trim() || 'unknown' : 'unknown';
 };
@@ -124,7 +144,7 @@ const getGemini = () => {
   return gemini;
 };
 
-export const handler = async event => {
+export const handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,

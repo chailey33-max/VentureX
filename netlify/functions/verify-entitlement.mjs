@@ -3,13 +3,30 @@ import { getFirestore } from 'firebase-admin/firestore';
 
 const getHeader = (event, headerName) => {
   const headers = event.headers || {};
-  return headers[headerName] || headers[headerName.toLowerCase()] || headers[headerName.toUpperCase()] || null;
+  return (
+    headers[headerName] ||
+    headers[headerName.toLowerCase()] ||
+    headers[headerName.toUpperCase()] ||
+    null
+  );
 };
 
 const initializeFirebaseAdmin = () => {
   if (admin.apps.length > 0) return;
 
   const projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID;
+
+  const serviceAccountJson =
+    process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+
+  if (serviceAccountJson) {
+    const serviceAccount = JSON.parse(serviceAccountJson);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      projectId: projectId || serviceAccount.project_id || undefined,
+    });
+    return;
+  }
 
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     admin.initializeApp({
@@ -33,7 +50,7 @@ const getDb = () => {
   return databaseId ? getFirestore(app, databaseId) : getFirestore(app);
 };
 
-const verifyAuthToken = async event => {
+const verifyAuthToken = async (event) => {
   const authHeader = getHeader(event, 'authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw new Error('UNAUTHORIZED');
@@ -48,7 +65,7 @@ const verifyAuthToken = async event => {
   return admin.auth().verifyIdToken(token);
 };
 
-const validateVerifyEntitlementPayload = payload => {
+const validateVerifyEntitlementPayload = (payload) => {
   if (payload === null || payload === undefined) return { ok: true };
   if (typeof payload !== 'object' || Array.isArray(payload)) {
     return { ok: false, error: 'Verify entitlement payload must be a JSON object.' };
@@ -62,7 +79,7 @@ const validateVerifyEntitlementPayload = payload => {
 const rateLimitBuckets = new Map();
 const abuseBuckets = new Map();
 
-const getClientIp = event => {
+const getClientIp = (event) => {
   const forwarded = getHeader(event, 'x-forwarded-for');
   return typeof forwarded === 'string' ? forwarded.split(',')[0].trim() || 'unknown' : 'unknown';
 };
@@ -109,7 +126,7 @@ const recordAbuseSignal = ({ scope, key, reason, metadata = {} }) => {
   }
 };
 
-export const handler = async event => {
+export const handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,

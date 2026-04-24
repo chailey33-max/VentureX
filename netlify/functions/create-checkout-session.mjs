@@ -1,7 +1,7 @@
 import admin from 'firebase-admin';
 import Stripe from 'stripe';
 
-const normalizeOrigin = value => {
+const normalizeOrigin = (value) => {
   try {
     return new URL(value).origin;
   } catch {
@@ -9,19 +9,24 @@ const normalizeOrigin = value => {
   }
 };
 
-const parseAllowedOrigins = value => {
+const parseAllowedOrigins = (value) => {
   if (!value) return [];
   return value
     .split(',')
-    .map(origin => origin.trim())
-    .filter(origin => origin.length > 0)
-    .map(origin => normalizeOrigin(origin))
-    .filter(origin => Boolean(origin));
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0)
+    .map((origin) => normalizeOrigin(origin))
+    .filter((origin) => Boolean(origin));
 };
 
 const getHeader = (event, headerName) => {
   const headers = event.headers || {};
-  return headers[headerName] || headers[headerName.toLowerCase()] || headers[headerName.toUpperCase()] || null;
+  return (
+    headers[headerName] ||
+    headers[headerName.toLowerCase()] ||
+    headers[headerName.toUpperCase()] ||
+    null
+  );
 };
 
 const defaultFrontendOrigins = [
@@ -42,7 +47,7 @@ const checkoutDefaultOrigin =
     ? configuredDefaultOrigin
     : approvedFrontendOrigins[0] || null;
 
-const resolveApprovedCheckoutOrigin = event => {
+const resolveApprovedCheckoutOrigin = (event) => {
   const candidates = [getHeader(event, 'origin'), getHeader(event, 'referer')].filter(Boolean);
 
   for (const candidate of candidates) {
@@ -64,6 +69,18 @@ const initializeFirebaseAdmin = () => {
 
   const projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID;
 
+  const serviceAccountJson =
+    process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+
+  if (serviceAccountJson) {
+    const serviceAccount = JSON.parse(serviceAccountJson);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      projectId: projectId || serviceAccount.project_id || undefined,
+    });
+    return;
+  }
+
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     admin.initializeApp({
       credential: admin.credential.applicationDefault(),
@@ -80,7 +97,7 @@ const initializeFirebaseAdmin = () => {
   throw new Error('Firebase Admin is not configured.');
 };
 
-const verifyAuthToken = async event => {
+const verifyAuthToken = async (event) => {
   const authHeader = getHeader(event, 'authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw new Error('UNAUTHORIZED');
@@ -95,7 +112,7 @@ const verifyAuthToken = async event => {
   return admin.auth().verifyIdToken(token);
 };
 
-const validateCheckoutPayload = payload => {
+const validateCheckoutPayload = (payload) => {
   if (payload === null || payload === undefined) {
     return { ok: true };
   }
@@ -111,7 +128,10 @@ const validateCheckoutPayload = payload => {
     }
   }
 
-  if (payload.userId !== undefined && (typeof payload.userId !== 'string' || payload.userId.length > 256)) {
+  if (
+    payload.userId !== undefined &&
+    (typeof payload.userId !== 'string' || payload.userId.length > 256)
+  ) {
     return { ok: false, error: 'userId must be a string up to 256 characters.' };
   }
 
@@ -122,7 +142,10 @@ const validateCheckoutPayload = payload => {
     return { ok: false, error: 'userEmail must be a string up to 320 characters.' };
   }
 
-  if (payload.origin !== undefined && (typeof payload.origin !== 'string' || payload.origin.length > 2048)) {
+  if (
+    payload.origin !== undefined &&
+    (typeof payload.origin !== 'string' || payload.origin.length > 2048)
+  ) {
     return { ok: false, error: 'origin must be a string up to 2048 characters.' };
   }
 
@@ -158,7 +181,7 @@ const isAllowedByRateLimit = ({ key, windowMs, maxRequests }) => {
   return { allowed: true, retryAfterSeconds: 0 };
 };
 
-export const handler = async event => {
+export const handler = async (event) => {
   const bodySize = Buffer.byteLength(event.body || '', 'utf8');
   if (bodySize > 2 * 1024) {
     return {
@@ -252,7 +275,8 @@ export const handler = async event => {
     }
 
     const forwardedFor = getHeader(event, 'x-forwarded-for');
-    const clientIp = typeof forwardedFor === 'string' ? forwardedFor.split(',')[0].trim() : 'unknown';
+    const clientIp =
+      typeof forwardedFor === 'string' ? forwardedFor.split(',')[0].trim() : 'unknown';
     const ipRateLimit = isAllowedByRateLimit({
       key: `checkout:ip:${clientIp || 'unknown'}`,
       windowMs: 60_000,
@@ -293,7 +317,8 @@ export const handler = async event => {
             currency: 'usd',
             product_data: {
               name: 'Business Ventures - Full Access',
-              description: 'Unlimited access to all business blueprints, AI naming, and execution plans.',
+              description:
+                'Unlimited access to all business blueprints, AI naming, and execution plans.',
             },
             unit_amount: 4900,
           },
