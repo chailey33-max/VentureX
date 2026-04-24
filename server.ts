@@ -358,14 +358,13 @@ async function startServer() {
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "script-src 'self' 'unsafe-inline' https://js.stripe.com https://apis.google.com",
       `connect-src 'self' ${cspConnectOrigins.join(' ')}`,
-      "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com https://accounts.google.com",
+      "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com https://accounts.google.com https://ai-studio-applet-webapp-c0928.firebaseapp.com",
       "worker-src 'self' blob:",
       'upgrade-insecure-requests',
     ].join('; ');
 
     res.setHeader('Content-Security-Policy', csp);
     res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('X-Content-Type-Options', 'nosniff');
